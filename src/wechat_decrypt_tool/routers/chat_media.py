@@ -12,7 +12,7 @@ import sys
 import time
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -51,6 +51,10 @@ from ..media_helpers import (
     _get_resource_dir,
     _guess_media_type_by_path,
     _is_probably_valid_image,
+    _image_payload_score,
+    _prefer_local_image_resource,
+    _save_best_image_resource,
+    _read_cached_image_resource,
     _iter_emoji_source_candidates,
     _iter_media_source_candidates,
     _order_media_candidates,
@@ -76,6 +80,7 @@ from ..chat_helpers import (
 )
 from ..path_fix import PathFixRoute
 from ..perf_trace import create_perf_trace
+from ..runtime_settings import remote_calls_enabled
 from ..wcdb_realtime import WCDB_REALTIME, exec_query as _wcdb_exec_query, get_avatar_urls as _wcdb_get_avatar_urls
 from ..voice_transcription import (
     VOICE_MODEL_DOWNLOAD_MANAGER,
@@ -88,6 +93,7 @@ from ..voice_transcription import (
     load_voice_data,
     set_voice_transcription_device,
     set_voice_transcription_model,
+    set_voice_model_download_source,
 )
 from ..native_voice_transcription import (
     NativeVoiceTriggerError,
@@ -124,12 +130,13 @@ class VoiceTranscriptionCacheLookupRequest(BaseModel):
 
 class VoiceTranscriptionSettingsRequest(BaseModel):
     device: Optional[str] = Field(None, description="推理设备：cpu 或 cuda")
-    model: Optional[str] = Field(None, description="Whisper 模型")
+    model: Optional[str] = Field(None, description="本地语音模型")
+    download_source: Optional[Literal["huggingface", "hf-mirror"]] = Field(None, description="语音模型下载源")
 
 
 class VoiceTranscriptionBatchRequest(BaseModel):
     account: Optional[str] = Field(None, description="账号目录名")
-    force: bool = Field(False, description="忽略现有 Whisper 缓存并重新识别")
+    force: bool = Field(False, description="忽略现有本地模型缓存并重新识别")
     engine: StrictStr = Field("local", description="批量转写方式：local 或 wechat-native")
     concurrency: Optional[conint(strict=True, ge=0)] = Field(  # type: ignore[valid-type]
         None,
@@ -184,6 +191,9 @@ def _is_loopback_host(host: str) -> bool:
 
 def _require_local_voice_mutation(request: Request) -> None:
     """Block cross-origin/LAN callers from expensive or destructive voice operations."""
+
+    if remote_calls_enabled():
+        return
 
     client_host = str(getattr(request.client, "host", "") or "").strip()
     if not _is_loopback_host(client_host):
@@ -439,6 +449,9 @@ def _build_cached_media_response(request: Optional[Request], data: bytes, media_
     payload = bytes(data or b"")
     etag = f'"{hashlib.sha1(payload).hexdigest()}"'
     cache_control = f"private, max-age={CHAT_MEDIA_BROWSER_CACHE_SECONDS}"
+    if media_type.startswith("image/"):
+        # ETag 保留浏览器缓存，但每次重新显示都验证本地是否已有更高分辨率版本。
+        cache_control = "private, max-age=0, must-revalidate"
     headers = {
         "Cache-Control": cache_control,
         "ETag": etag,
@@ -479,105 +492,12 @@ def _is_probable_large_image_source(path: Path) -> bool:
     return _image_candidate_variant_rank(path) <= 2
 
 
-def _image_candidate_stat(path: Optional[Path]) -> tuple[int, float]:
-    if not path:
-        return 0, 0.0
-    try:
-        st = path.stat()
-        return int(st.st_size), float(st.st_mtime)
-    except Exception:
-        return 0, 0.0
-
-
-def _should_prefer_live_image_candidates(
-    *,
-    cached_path: Optional[Path],
-    live_candidates: list[Path],
-) -> bool:
-    if not live_candidates:
-        return False
-    if not cached_path:
-        return True
-
-    best_live = live_candidates[0]
-    live_rank = _image_candidate_variant_rank(best_live)
-    if live_rank < 2:
-        return True
-
-    cache_size, cache_mtime = _image_candidate_stat(cached_path)
-    live_size, live_mtime = _image_candidate_stat(best_live)
-    if live_rank == 2 and live_size > cache_size:
-        return True
-    if live_rank == 2 and live_size >= cache_size and live_mtime > cache_mtime:
-        return True
-    return False
-
-
-def _detect_image_payload_dimensions(data: bytes, media_type: str) -> tuple[int, int]:
-    payload = bytes(data or b"")
-    mt = str(media_type or "").strip().lower()
-    try:
-        if mt == "image/png" and len(payload) >= 24 and payload.startswith(b"\x89PNG\r\n\x1a\n"):
-            return int.from_bytes(payload[16:20], "big"), int.from_bytes(payload[20:24], "big")
-        if mt == "image/gif" and len(payload) >= 10 and payload.startswith((b"GIF87a", b"GIF89a")):
-            return int.from_bytes(payload[6:8], "little"), int.from_bytes(payload[8:10], "little")
-        if mt == "image/jpeg" and len(payload) >= 4 and payload.startswith(b"\xff\xd8"):
-            i = 2
-            while i < len(payload) - 9:
-                if payload[i] != 0xFF:
-                    i += 1
-                    continue
-                marker = payload[i + 1]
-                i += 2
-                if marker in (0xD8, 0xD9):
-                    continue
-                if i + 2 > len(payload):
-                    break
-                seg_len = int.from_bytes(payload[i : i + 2], "big")
-                if seg_len < 2:
-                    break
-                if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
-                    if i + 7 <= len(payload):
-                        return int.from_bytes(payload[i + 5 : i + 7], "big"), int.from_bytes(payload[i + 3 : i + 5], "big")
-                    break
-                i += seg_len
-    except Exception:
-        return 0, 0
-    return 0, 0
-
-
-def _image_payload_score(data: bytes, media_type: str) -> tuple[int, int]:
-    width, height = _detect_image_payload_dimensions(data, media_type)
-    area = int(width or 0) * int(height or 0)
-    return area, len(data or b"")
-
-
 def _write_cached_chat_image(account_dir: Path, md5: str, data: bytes) -> None:
     md5_norm = str(md5 or "").strip().lower()
     if (not md5_norm) or (not data):
         return
 
-    ext = _detect_image_extension(data)
-    out_path = _get_decrypted_resource_path(account_dir, md5_norm, ext)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    for stale_ext in ("jpg", "png", "gif", "webp", "dat"):
-        stale_path = _get_decrypted_resource_path(account_dir, md5_norm, stale_ext)
-        if stale_path == out_path:
-            continue
-        try:
-            if stale_path.exists():
-                stale_path.unlink()
-        except Exception:
-            pass
-
-    try:
-        if out_path.exists() and out_path.read_bytes() == data:
-            return
-    except Exception:
-        pass
-
-    out_path.write_bytes(data)
+    _save_best_image_resource(account_dir, md5_norm, data)
 
 
 def _resolve_avatar_remote_url(
@@ -667,6 +587,25 @@ def _size_matches_with_prefix(actual_size: int, expected_size: int, *, tolerance
 def _normalize_record_index_path(value: str) -> str:
     text = str(value or "").strip()
     return text if re.fullmatch(r"\d+(?:_\d+)*", text) else ""
+
+
+def _has_scoped_record_media_lookup(
+    *,
+    file_size: Optional[int],
+    record_index: Optional[int],
+    record_index_path: Optional[str],
+    record_attach: Optional[str],
+) -> bool:
+    attach = str(record_attach or "").strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{32}", attach):
+        return False
+    try:
+        if int(file_size or 0) <= 0:
+            return False
+        idx = int(record_index if record_index is not None else -1)
+    except Exception:
+        return False
+    return idx >= 0 or bool(_normalize_record_index_path(str(record_index_path or "")))
 
 
 def _month_hint_from_timestamp(ts_value: int) -> str:
@@ -1086,12 +1025,25 @@ def _fast_probe_record_video_in_chat_attach(
 
     Older code verified only XML fullmd5, but real WeChat can save the Rec file
     with a different content md5 after the media is loaded. For merged records,
-    `record_index + datasize + month + conversation` is the stable local key.
+    a scoped, unique `record_index + datasize` match is also accepted. Empty
+    fullmd5 is allowed only with an explicit attach hash and exact datasize.
     """
     wxid_dir_str = str(wxid_dir_str or "").strip()
     username = str(username or "").strip()
     md5_norm = str(md5 or "").strip().lower()
-    if not wxid_dir_str or not username or not re.fullmatch(r"[a-f0-9]{32}", md5_norm):
+    record_attach_norm = str(record_attach or "").strip().lower()
+    md5_valid = bool(re.fullmatch(r"[a-f0-9]{32}", md5_norm))
+    expected_size = int(file_size or 0)
+    idx = int(record_index if record_index is not None else -1)
+    idx_path = _normalize_record_index_path(record_index_path)
+    has_index = idx >= 0 or bool(idx_path)
+    if not wxid_dir_str or (not username and not record_attach_norm):
+        return None
+    if not md5_valid and not (
+        re.fullmatch(r"[a-f0-9]{32}", record_attach_norm)
+        and expected_size > 0
+        and has_index
+    ):
         return None
 
     try:
@@ -1102,10 +1054,6 @@ def _fast_probe_record_video_in_chat_attach(
     base_dirs = _iter_chat_attach_base_dirs(wxid_dir, username, record_attach)
     if not base_dirs:
         return None
-
-    expected_size = int(file_size or 0)
-    idx = int(record_index if record_index is not None else -1)
-    idx_path = _normalize_record_index_path(record_index_path)
 
     def file_md5(path: Path) -> str:
         h = hashlib.md5()
@@ -1158,33 +1106,6 @@ def _fast_probe_record_video_in_chat_attach(
             return None
         return None
 
-    def accept_video(candidate: Path, *, allow_index_size: bool) -> bool:
-        try:
-            if not candidate.is_file():
-                return False
-            stat_size = int(candidate.stat().st_size)
-            if expected_size > 0 and stat_size != expected_size:
-                return False
-            if allow_index_size and expected_size > 0 and is_plain_video(candidate):
-                return True
-            return file_md5(candidate) == md5_norm
-        except Exception:
-            return False
-
-    def loose_index_video_score(candidate: Path) -> Optional[tuple[int, int, float, str]]:
-        if not idx_path:
-            return None
-        try:
-            if str(candidate.stem or "") != idx_path:
-                return None
-            if not candidate.is_file() or not is_plain_video(candidate):
-                return None
-            stat = candidate.stat()
-            size_delta = abs(int(stat.st_size) - expected_size) if expected_size > 0 else 0
-            return (size_delta, -int(stat.st_size), -float(stat.st_mtime), str(candidate))
-        except Exception:
-            return None
-
     video_exts = {".mp4", ".m4v", ".mov"}
     index_names: list[str] = []
     index_stems: list[str] = []
@@ -1199,7 +1120,35 @@ def _fast_probe_record_video_in_chat_attach(
         seen_stems.add(stem)
         index_names.extend([f"{stem}.mp4", f"{stem}.m4v", f"{stem}.mov"])
 
-    loose_index_hits: list[tuple[tuple[int, int, float, str], Path]] = []
+    index_hits: dict[str, Path] = {}
+    exact_size_hits: dict[str, Path] = {}
+    md5_cache: dict[str, str] = {}
+
+    def add_index_candidate(candidate: Path) -> None:
+        try:
+            if not candidate.is_file() or not is_plain_video(candidate):
+                return
+            key = str(candidate.resolve())
+            index_hits[key] = candidate
+            if expected_size > 0 and int(candidate.stat().st_size) == expected_size:
+                exact_size_hits[key] = candidate
+        except Exception:
+            return
+
+    def cached_file_md5(candidate: Path) -> str:
+        try:
+            key = str(candidate.resolve())
+        except Exception:
+            key = str(candidate)
+        if key not in md5_cache:
+            md5_cache[key] = file_md5(candidate)
+        return md5_cache[key]
+
+    def resolved_result(video_path: Path) -> Optional[str]:
+        if not want_thumb:
+            return str(video_path)
+        thumb = sibling_thumb_for_video(video_path)
+        return str(thumb) if thumb else None
 
     for base_dir in base_dirs:
         for month_dir in _iter_chat_attach_month_dirs(base_dir, src_create_time):
@@ -1210,9 +1159,9 @@ def _fast_probe_record_video_in_chat_attach(
             except Exception:
                 continue
 
-            # First: direct Rec index lookup. This fixes freshly-loaded merged
-            # record media where the saved file is `V/2.mp4` / `V/3.mp4` and the
-            # raw file md5 no longer equals XML fullmd5.
+            # Direct Rec index lookup reads only the expected filenames. Do not
+            # choose the "closest" size: another record in the same month can
+            # legitimately contain a different V/2.mp4 or V/3.mp4.
             if index_names:
                 try:
                     for dirpath, _dirnames, _filenames in os.walk(str(rec_root)):
@@ -1220,46 +1169,46 @@ def _fast_probe_record_video_in_chat_attach(
                         if v_dir.name.lower() != "v":
                             continue
                         for name in index_names:
-                            candidate = v_dir / name
-                            if accept_video(candidate, allow_index_size=True):
-                                if not want_thumb:
-                                    return str(candidate)
-                                thumb = sibling_thumb_for_video(candidate)
-                                return str(thumb) if thumb else None
-                            score = loose_index_video_score(candidate)
-                            if score is not None:
-                                loose_index_hits.append((score, candidate))
+                            add_index_candidate(v_dir / name)
                 except Exception:
                     pass
 
-            if loose_index_hits:
-                loose_index_hits.sort(key=lambda item: item[0])
-                candidate = loose_index_hits[0][1]
-                if not want_thumb:
-                    return str(candidate)
-                thumb = sibling_thumb_for_video(candidate)
-                return str(thumb) if thumb else None
-
-            # Fallback: scan scoped Rec/V files and verify md5. This keeps the
-            # old behavior for records where no dataitem index is available.
+    if len(exact_size_hits) == 1:
+        return resolved_result(next(iter(exact_size_hits.values())))
+    if md5_valid:
+        for candidate in index_hits.values():
             try:
-                for dirpath, _dirnames, filenames in os.walk(str(rec_root)):
-                    current_dir = Path(dirpath)
-                    if current_dir.name.lower() != "v":
-                        continue
-                    for fn in filenames:
-                        candidate = current_dir / fn
-                        if str(candidate.suffix or "").lower() not in video_exts:
-                            continue
-                        if not accept_video(candidate, allow_index_size=False):
-                            continue
-
-                        if not want_thumb:
-                            return str(candidate)
-                        thumb = sibling_thumb_for_video(candidate)
-                        return str(thumb) if thumb else None
+                if cached_file_md5(candidate) == md5_norm:
+                    return resolved_result(candidate)
             except Exception:
                 continue
+    # Preserve the old nested-index recovery only when it is unambiguous. This
+    # covers transformed local files whose XML md5 and datasize both changed.
+    if md5_valid and idx_path and len(index_hits) == 1:
+        return resolved_result(next(iter(index_hits.values())))
+
+    if md5_valid:
+        # Fallback: scan scoped Rec/V files and verify md5 when no usable index
+        # match exists. Empty-md5 requests never enter this broad hashing pass.
+        for base_dir in base_dirs:
+            for month_dir in _iter_chat_attach_month_dirs(base_dir, src_create_time):
+                rec_root = month_dir / "Rec"
+                try:
+                    for dirpath, _dirnames, filenames in os.walk(str(rec_root)):
+                        current_dir = Path(dirpath)
+                        if current_dir.name.lower() != "v":
+                            continue
+                        for fn in filenames:
+                            candidate = current_dir / fn
+                            if str(candidate.suffix or "").lower() not in video_exts:
+                                continue
+                            try:
+                                if candidate.is_file() and cached_file_md5(candidate) == md5_norm:
+                                    return resolved_result(candidate)
+                            except Exception:
+                                continue
+                except Exception:
+                    continue
 
     return None
 
@@ -2647,7 +2596,9 @@ async def get_chat_image(
     # md5 模式：优先检查解密资源目录；如果微信目录里已经有更高质量版本，会在后面自动升级。
     if md5:
         cache_started_at = time.perf_counter()
-        decrypted_path = _try_find_decrypted_resource(account_dir, str(md5).lower())
+        decrypted_path, data, media_type = await asyncio.to_thread(
+            _read_cached_image_resource, account_dir, str(md5).lower()
+        )
         trace(
             "decrypted-cache:path-lookup",
             hasPath=bool(decrypted_path),
@@ -2656,8 +2607,6 @@ async def get_chat_image(
         )
         if decrypted_path:
             read_started_at = time.perf_counter()
-            data = decrypted_path.read_bytes()
-            media_type = _detect_image_media_type(data[:32])
             valid_image = bool(
                 media_type != "application/octet-stream"
                 and _is_probably_valid_image(data, media_type)
@@ -2675,12 +2624,6 @@ async def get_chat_image(
                 cached_path = decrypted_path
                 cached_data = data
                 cached_media_type = media_type
-            # Corrupted cached file (e.g. wrong ext / partial data): remove and regenerate from source.
-            elif decrypted_path.suffix.lower() in {".jpg", ".jpeg", ".png", ".gif", ".webp"}:
-                try:
-                    decrypted_path.unlink()
-                except Exception:
-                    pass
     trace(
         "decrypted-cache:checked",
         hasCachedPath=bool(cached_path),
@@ -2688,14 +2631,29 @@ async def get_chat_image(
         cachedMediaType=cached_media_type,
     )
 
-    if cached_path and (not prefer_live) and (not fetch_remote):
-        trace(
-            "response:ready",
-            result="decrypted-cache-hit",
-            mediaType=cached_media_type,
-            bytes=len(cached_data or b""),
+    if md5 and (not prefer_live) and (not fetch_remote) and not (record_attach or record_index_path):
+        # 旧预解密缓存可能只有 120×120；先比较当前会话或 hardlink 指向的本地变体。
+        upgraded = await asyncio.to_thread(
+            _prefer_local_image_resource, account_dir, str(md5), source=cached_path, username=str(username or "")
         )
-        return _build_cached_media_response(request, cached_data, cached_media_type)
+        if upgraded:
+            if upgraded.is_relative_to(_get_resource_dir(account_dir)):
+                _, latest_data, latest_type = await asyncio.to_thread(_read_cached_image_resource, account_dir, str(md5))
+            else:
+                latest_data, latest_type = await asyncio.to_thread(
+                    _read_and_maybe_decrypt_media, upgraded, account_dir=account_dir
+                )
+            if latest_type.startswith("image/") and _is_probably_valid_image(latest_data, latest_type):
+                cached_path = upgraded
+                cached_data, cached_media_type = latest_data, latest_type
+        if cached_path:
+            trace(
+                "response:ready",
+                result="decrypted-cache-hit",
+                mediaType=cached_media_type,
+                bytes=len(cached_data or b""),
+            )
+            return _build_cached_media_response(request, cached_data, cached_media_type)
 
     # 回退：从微信数据目录实时定位并解密
     roots_started_at = time.perf_counter()
@@ -2722,6 +2680,8 @@ async def get_chat_image(
         roots.append(db_storage_dir)
 
     if not roots:
+        if cached_path and not fetch_remote:
+            return _build_cached_media_response(request, cached_data, cached_media_type)
         raise HTTPException(
             status_code=404,
             detail="wxid_dir/db_storage_path not found. Please decrypt with db_storage_path to enable media lookup.",
@@ -2761,7 +2721,35 @@ async def get_chat_image(
             )
         except cdn_image_service.CdnQuotaExceededError as quota_err:
             trace("cdn:quota-exceeded", detail=str(quota_err))
-            raise HTTPException(status_code=429, detail=str(quota_err))
+            quota_headers: dict[str, str] | None = None
+            try:
+                resets_at = (quota_err.quota or {}).get("resetsAt")
+                if resets_at is not None:
+                    quota_headers = {"Retry-After": str(max(0, int(int(resets_at) - time.time())))}
+            except (TypeError, ValueError):
+                quota_headers = None
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "quota_exceeded", "message": str(quota_err), "quota": quota_err.quota},
+                headers=quota_headers,
+            )
+        except cdn_image_service.CdnRateLimitedError as rate_err:
+            trace("cdn:rate-limited", detail=str(rate_err))
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "code": "rate_limited",
+                    "message": str(rate_err),
+                    "retryAfterSeconds": rate_err.retry_after,
+                },
+                headers=rate_err.headers() or None,
+            )
+        except cdn_image_service.CdnAccountFrozenError as frozen_err:
+            trace("cdn:account-frozen", detail=str(frozen_err))
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "account_frozen", "message": str(frozen_err)},
+            )
         except Exception as cdn_err:  # noqa: BLE001
             trace("cdn:error", error=str(cdn_err)[:200], explicit=bool(fetch_remote))
             return None
@@ -2975,10 +2963,7 @@ async def get_chat_image(
             seen_live.add(key)
             live_candidates.append(candidate)
 
-        if _should_prefer_live_image_candidates(cached_path=cached_path, live_candidates=live_candidates):
-            candidates = [*live_candidates, cached_path]
-        else:
-            candidates = [cached_path, *live_candidates]
+        candidates = [cached_path, *live_candidates]
 
     logger.info(f"chat_image: md5={md5} file_id={file_id} candidates={len(candidates)} first={p}")
 
@@ -3043,7 +3028,7 @@ async def get_chat_image(
                 source_key = str(src_path)
             if source_key != cached_candidate_key and _is_probable_large_image_source(src_path):
                 local_large_found = True
-            if prefer_live or fetch_remote:
+            if media_type.startswith("image/"):
                 score = _image_payload_score(data, media_type)
                 if best_score is None or score > best_score:
                     best_score = score
@@ -3054,7 +3039,7 @@ async def get_chat_image(
             chosen = src_path
             break
 
-    if (prefer_live or fetch_remote) and best_chosen is not None:
+    if best_chosen is not None:
         chosen = best_chosen
         data = best_data
         media_type = best_media_type
@@ -3130,11 +3115,14 @@ async def get_chat_emoji(
     data = b""
     media_type = "application/octet-stream"
     if p:
-        data, media_type = _read_and_maybe_decrypt_media(p, account_dir=account_dir, weixin_root=wxid_dir)
+        # 本地 wxgf 在非 Windows 上要启动 ffmpeg 解码，放到线程里，不阻塞事件循环。
+        data, media_type = await asyncio.to_thread(
+            _read_and_maybe_decrypt_media, p, account_dir=account_dir, weixin_root=wxid_dir
+        )
 
     if media_type == "application/octet-stream":
         # Some emojis are stored encrypted (see emoticon.db); try remote fetch as fallback.
-        data2, mt2 = _try_fetch_emoticon_from_remote(account_dir, str(md5).lower())
+        data2, mt2 = await asyncio.to_thread(_try_fetch_emoticon_from_remote, account_dir, str(md5).lower())
         if data2 is not None and mt2:
             data, media_type = data2, mt2
 
@@ -3157,7 +3145,7 @@ async def get_chat_emoji(
                 if not blob:
                     continue
                 try:
-                    data2, mt = _try_strip_media_prefix(blob)
+                    data2, mt = await asyncio.to_thread(_try_strip_media_prefix, blob)
                 except Exception:
                     data2, mt = blob, "application/octet-stream"
 
@@ -3207,8 +3195,14 @@ async def get_chat_video_thumb(
     record_attach: Optional[str] = None,
     deep_scan: bool = False,
 ):
-    if (not md5) and (not file_id):
-        raise HTTPException(status_code=400, detail="Missing md5/file_id.")
+    has_scoped_record_lookup = _has_scoped_record_media_lookup(
+        file_size=file_size,
+        record_index=record_index,
+        record_index_path=record_index_path,
+        record_attach=record_attach,
+    )
+    if (not md5) and (not file_id) and (not has_scoped_record_lookup):
+        raise HTTPException(status_code=400, detail="Missing md5/file_id or scoped record lookup.")
     account_dir = _resolve_account_dir(account)
     md5_norm = str(md5 or "").strip().lower() if md5 else ""
     file_id_norm = str(file_id or "").strip()
@@ -3289,6 +3283,28 @@ async def get_chat_video_thumb(
 
     p: Optional[Path] = None
     allow_deep_scan = False
+    if (not md5_norm) and has_scoped_record_lookup and wxid_dir:
+        record_probe_started_at = time.perf_counter()
+        hit = await asyncio.to_thread(
+            _fast_probe_record_video_in_chat_attach,
+            wxid_dir_str=str(wxid_dir),
+            username=str(username or ""),
+            md5="",
+            want_thumb=True,
+            src_create_time=int(src_create_time or 0),
+            file_size=int(file_size or 0),
+            record_index=int(record_index if record_index is not None else -1),
+            record_index_path=str(record_index_path or ""),
+            record_attach=str(record_attach or ""),
+        )
+        if hit:
+            p = Path(hit)
+        trace(
+            "source:chat-record-video-probe",
+            found=bool(hit),
+            path=str(hit or ""),
+            elapsedMsLocal=round((time.perf_counter() - record_probe_started_at) * 1000.0, 1),
+        )
     if md5_norm:
         hardlink_started_at = time.perf_counter()
         p = await asyncio.to_thread(
@@ -3435,8 +3451,14 @@ async def get_chat_video(
     record_attach: Optional[str] = None,
     deep_scan: bool = False,
 ):
-    if (not md5) and (not file_id):
-        raise HTTPException(status_code=400, detail="Missing md5/file_id.")
+    has_scoped_record_lookup = _has_scoped_record_media_lookup(
+        file_size=file_size,
+        record_index=record_index,
+        record_index_path=record_index_path,
+        record_attach=record_attach,
+    )
+    if (not md5) and (not file_id) and (not has_scoped_record_lookup):
+        raise HTTPException(status_code=400, detail="Missing md5/file_id or scoped record lookup.")
     account_dir = _resolve_account_dir(account)
     md5_norm = str(md5 or "").strip().lower() if md5 else ""
     file_id_norm = str(file_id or "").strip()
@@ -3507,6 +3529,28 @@ async def get_chat_video(
 
     p: Optional[Path] = None
     allow_deep_scan = False
+    if (not md5_norm) and has_scoped_record_lookup and wxid_dir:
+        record_probe_started_at = time.perf_counter()
+        hit = await asyncio.to_thread(
+            _fast_probe_record_video_in_chat_attach,
+            wxid_dir_str=str(wxid_dir),
+            username=str(username or ""),
+            md5="",
+            want_thumb=False,
+            src_create_time=int(src_create_time or 0),
+            file_size=int(file_size or 0),
+            record_index=int(record_index if record_index is not None else -1),
+            record_index_path=str(record_index_path or ""),
+            record_attach=str(record_attach or ""),
+        )
+        if hit:
+            p = Path(hit)
+        trace(
+            "source:chat-record-video-probe",
+            found=bool(hit),
+            path=str(hit or ""),
+            elapsedMsLocal=round((time.perf_counter() - record_probe_started_at) * 1000.0, 1),
+        )
     if md5_norm:
         hardlink_started_at = time.perf_counter()
         p = await asyncio.to_thread(
@@ -3710,24 +3754,27 @@ async def get_chat_voice(server_id: int, account: Optional[str] = None):
     )
 
 
-@router.get("/api/chat/media/voice/transcription/status", summary="检查本地 Whisper 语音转文字能力")
+@router.get("/api/chat/media/voice/transcription/status", summary="检查本地语音转文字能力")
 async def get_chat_voice_transcription_status():
     return await asyncio.to_thread(get_voice_transcription_service().status)
 
 
-@router.put("/api/chat/media/voice/transcription/settings", summary="设置本地 Whisper 模型或推理设备")
+@router.put("/api/chat/media/voice/transcription/settings", summary="设置本地语音模型、推理设备或下载源")
 async def set_chat_voice_transcription_settings(req: VoiceTranscriptionSettingsRequest, request: Request):
     _require_local_voice_mutation(request)
     device = str(req.device or "").strip()
     model = str(req.model or "").strip()
-    if int(bool(device)) + int(bool(model)) != 1:
-        raise HTTPException(status_code=400, detail="每次只能修改 device 或 model 中的一项。")
+    download_source = req.download_source
+    if sum(bool(value) for value in (device, model, download_source)) != 1:
+        raise HTTPException(status_code=400, detail="每次只能修改 device、model 或 download_source 中的一项。")
     try:
         configuration = None
         if model:
             configuration = await asyncio.to_thread(set_voice_transcription_model, model)
         if device:
             configuration = await asyncio.to_thread(set_voice_transcription_device, device)
+        if download_source:
+            configuration = await asyncio.to_thread(set_voice_model_download_source, download_source)
     except VoiceTranscriptionError as exc:
         status_code = 409 if exc.code in {"device_locked", "model_locked", "model_busy"} else 400
         raise HTTPException(
@@ -3737,7 +3784,7 @@ async def set_chat_voice_transcription_settings(req: VoiceTranscriptionSettingsR
     return {"status": "success", "configuration": configuration}
 
 
-@router.post("/api/chat/media/voice/transcription/models/{model}/download", summary="下载 Whisper 模型")
+@router.post("/api/chat/media/voice/transcription/models/{model}/download", summary="下载本地语音模型")
 async def download_chat_voice_transcription_model(model: str, request: Request):
     _require_local_voice_mutation(request)
     try:
@@ -3750,7 +3797,28 @@ async def download_chat_voice_transcription_model(model: str, request: Request):
         ) from exc
 
 
-@router.get("/api/chat/media/voice/transcription/models/downloads/{job_id}", summary="查询 Whisper 模型下载任务")
+@router.post("/api/chat/media/voice/transcription/qwen-gpu/{action}", summary="安装或暂停 Qwen GPU 组件并启用模型")
+async def prepare_qwen_gpu(action: str, request: Request):
+    _require_local_voice_mutation(request)
+    from ..qwen_gpu_runtime import get_qwen_runtime
+    manager = get_qwen_runtime()
+    try:
+        if action == "prepare":
+            return await asyncio.to_thread(manager.start)
+        if action == "pause":
+            return manager.pause()
+        raise ValueError("不支持的 GPU 组件操作。")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "qwen_runtime_unavailable", "message": str(exc)}) from None
+
+
+@router.get("/api/chat/media/voice/transcription/qwen-gpu/status", summary="查询 Qwen GPU 组件安装进度")
+async def qwen_gpu_status():
+    from ..qwen_gpu_runtime import get_qwen_runtime
+    return get_qwen_runtime().status()
+
+
+@router.get("/api/chat/media/voice/transcription/models/downloads/{job_id}", summary="查询语音模型下载任务")
 async def get_chat_voice_transcription_model_download(job_id: str):
     try:
         return VOICE_MODEL_DOWNLOAD_MANAGER.get(job_id)
@@ -3761,7 +3829,7 @@ async def get_chat_voice_transcription_model_download(job_id: str):
         ) from exc
 
 
-@router.delete("/api/chat/media/voice/transcription/models/{model}", summary="删除 Whisper 模型")
+@router.delete("/api/chat/media/voice/transcription/models/{model}", summary="删除本地语音模型")
 async def delete_chat_voice_transcription_model(model: str, request: Request):
     _require_local_voice_mutation(request)
     try:

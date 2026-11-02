@@ -28,7 +28,8 @@ def load_wce_integrity_native() -> Any:
 
     repo_root = Path(__file__).resolve().parents[2]
     explicit_native_path = str(os.environ.get("WCE_INTEGRITY_NATIVE_PATH") or "").strip()
-    candidates = ([Path(explicit_native_path)] if explicit_native_path else []) + [
+    explicit_native = Path(explicit_native_path) if explicit_native_path else None
+    candidates = ([explicit_native] if explicit_native is not None else []) + [
         repo_root / "native" / "wce_integrity" / "target" / "release" / "wce_integrity.dll",
         repo_root / "native" / "wce_integrity" / "target-next" / "release" / "wce_integrity.dll",
         repo_root / "native" / "wce_integrity" / "target" / "release" / "libwce_integrity.dylib",
@@ -42,6 +43,7 @@ def load_wce_integrity_native() -> Any:
         candidates.append(
             Path(__file__).resolve().parent / "native" / "macos" / "arm64" / "libwce_integrity.dylib"
         )
+    executable_native = None
     if getattr(sys, "frozen", False):
         executable_native = Path(sys.executable).resolve().parent / "native"
         candidates.extend(
@@ -62,7 +64,17 @@ def load_wce_integrity_native() -> Any:
             )
         )
     candidates = [path for path in candidates if path.is_file()]
-    candidates.sort(key=lambda path: path.stat().st_mtime_ns, reverse=True)
+    # A PyInstaller extraction receives a fresh mtime on every launch. Prefer
+    # the installed external module so a reviewed package update cannot be
+    # shadowed by a stale copy embedded in the frozen backend.
+    candidates.sort(
+        key=lambda path: (
+            path == explicit_native,
+            executable_native is not None and path.parent == executable_native,
+            path.stat().st_mtime_ns,
+        ),
+        reverse=True,
+    )
     for build_path in candidates:
         try:
             loader = importlib.machinery.ExtensionFileLoader(module_name, str(build_path))

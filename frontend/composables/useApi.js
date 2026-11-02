@@ -343,7 +343,37 @@ export const useApi = () => {
     if (params && params.month != null) query.set('month', String(params.month))
     if (params && params.source) query.set('source', params.source)
     const url = '/chat/messages/daily_counts' + (query.toString() ? `?${query.toString()}` : '')
-    return await request(url)
+    // 外部 signal 存在时也必须生效；部分 fetch 包装器会跳过自身的 timeout。
+    const controller = new AbortController()
+    const abort = () => controller.abort(params.signal?.reason)
+    let rejectAbort
+    const aborted = new Promise((_, reject) => { rejectAbort = reject })
+    const onAbort = () => rejectAbort(controller.signal.reason || new DOMException('请求已取消', 'AbortError'))
+    controller.signal.addEventListener('abort', onAbort, { once: true })
+    params.signal?.addEventListener('abort', abort, { once: true })
+    if (params.signal?.aborted) abort()
+    const timer = setTimeout(() => {
+      controller.abort(new DOMException('加载日历超时，请重试', 'TimeoutError'))
+    }, 20_000)
+    try {
+      if (controller.signal.aborted) return await aborted
+      return await Promise.race([
+        aborted,
+        request(url, { signal: controller.signal, timeout: 20_000, retry: 0 })
+      ])
+    } catch (error) {
+      if (controller.signal.reason?.name === 'TimeoutError') {
+        throw new Error('加载日历超时，请重试')
+      }
+      if (controller.signal.aborted) throw controller.signal.reason || error
+      // 保留后端的中文错误，网络错误使用可读的中文提示。
+      if (error?.status || error?.statusCode) throw error
+      throw new Error('加载日历失败，请检查连接后重试')
+    } finally {
+      clearTimeout(timer)
+      params.signal?.removeEventListener('abort', abort)
+      controller.signal.removeEventListener('abort', onAbort)
+    }
   }
 
   // 聊天记录定位锚点：某日第一条 / 会话最早一条
@@ -425,6 +455,28 @@ export const useApi = () => {
     return await request(url)
   }
 
+  const startSnsFullSync = async (params = {}) => {
+    const query = new URLSearchParams()
+    if (params && params.account) query.set('account', params.account)
+    const url = '/sns/realtime/full_sync' + (query.toString() ? `?${query.toString()}` : '')
+    return await request(url, { method: 'POST' })
+  }
+
+  const getSnsFullSyncStatus = async (params = {}) => {
+    const query = new URLSearchParams()
+    if (params && params.account) query.set('account', params.account)
+    const url = '/sns/realtime/full_sync/status' + (query.toString() ? `?${query.toString()}` : '')
+    return await request(url)
+  }
+
+  const cancelSnsFullSync = async (params = {}) => {
+    const query = new URLSearchParams()
+    if (params && params.account) query.set('account', params.account)
+    if (params && params.sync_id) query.set('sync_id', String(params.sync_id))
+    const url = '/sns/realtime/full_sync' + (query.toString() ? `?${query.toString()}` : '')
+    return await request(url, { method: 'DELETE' })
+  }
+
   const openChatMediaFolder = async (params = {}) => {
     const query = new URLSearchParams()
     if (params && params.account) query.set('account', params.account)
@@ -490,6 +542,7 @@ export const useApi = () => {
     const body = {}
     if (data.device != null) body.device = String(data.device || '').trim().toLowerCase()
     if (data.model != null) body.model = String(data.model || '').trim()
+    if (data.download_source != null) body.download_source = String(data.download_source || '').trim()
     return await request('/chat/media/voice/transcription/settings', {
       method: 'PUT',
       body
@@ -510,6 +563,10 @@ export const useApi = () => {
       method: 'POST'
     })
   }
+
+  const prepareQwenGpu = async () => await request('/chat/media/voice/transcription/qwen-gpu/prepare', { method: 'POST' })
+  const pauseQwenGpu = async () => await request('/chat/media/voice/transcription/qwen-gpu/pause', { method: 'POST' })
+  const getQwenGpuStatus = async () => await request('/chat/media/voice/transcription/qwen-gpu/status')
 
   const getVoiceTranscriptionModelDownload = async (jobId) => {
     const id = encodeURIComponent(String(jobId || '').trim())
@@ -650,7 +707,7 @@ export const useApi = () => {
     })
   }
 
-  // 聊天记录导出（离线zip）
+  // 聊天记录导出（ZIP 全量或增量目录）
   const createChatExport = async (data = {}) => {
     return await request('/chat/exports', {
       method: 'POST',
@@ -673,7 +730,14 @@ export const useApi = () => {
         html_page_size: data.html_page_size != null ? Number(data.html_page_size) : 1000,
         privacy_mode: !!data.privacy_mode,
         file_name: data.file_name || null,
-        transcribe_voice: !!data.transcribe_voice
+        transcribe_voice: !!data.transcribe_voice,
+        output_mode: data.output_mode === 'folder' ? 'folder' : 'zip',
+        folder_name: data.folder_name || null,
+        baseline: data.baseline && typeof data.baseline === 'object' ? data.baseline : null,
+        missing_files: Array.isArray(data.missing_files) ? data.missing_files : [],
+        reset_baseline: !!data.reset_baseline,
+        repair_usernames: Array.isArray(data.repair_usernames) ? data.repair_usernames : [],
+        recheck_media: !!data.recheck_media
       }
     })
   }
@@ -741,6 +805,8 @@ export const useApi = () => {
     if (params && params.keyword) query.set('keyword', params.keyword)
     if (params && params.include_friends != null) query.set('include_friends', String(!!params.include_friends))
     if (params && params.include_groups != null) query.set('include_groups', String(!!params.include_groups))
+    if (params && params.include_enterprise_friends != null) query.set('include_enterprise_friends', String(!!params.include_enterprise_friends))
+    if (params && params.include_enterprise_groups != null) query.set('include_enterprise_groups', String(!!params.include_enterprise_groups))
     if (params && params.include_officials != null) query.set('include_officials', String(!!params.include_officials))
     if (params && params.include_official_subscriptions != null) query.set('include_official_subscriptions', String(!!params.include_official_subscriptions))
     if (params && params.include_official_services != null) query.set('include_official_services', String(!!params.include_official_services))
@@ -780,6 +846,17 @@ export const useApi = () => {
     return await request(url, params?.signal ? { signal: params.signal } : {})
   }
 
+  const getChatGroupMembers = async (params) => {
+    const query = new URLSearchParams({
+      account: params.account,
+      username: params.username,
+      limit: String(params.limit ?? 40),
+      offset: String(params.offset ?? 0),
+      source: 'auto'
+    })
+    return await request(`/chat/contacts/group_members?${query}`, { signal: params.signal })
+  }
+
   const exportChatContacts = async (payload = {}) => {
     return await request('/chat/contacts/export', {
       method: 'POST',
@@ -793,6 +870,8 @@ export const useApi = () => {
         contact_types: {
           friends: payload?.contact_types?.friends == null ? true : !!payload.contact_types.friends,
           groups: payload?.contact_types?.groups == null ? true : !!payload.contact_types.groups,
+          enterprise_friends: payload?.contact_types?.enterprise_friends == null ? null : !!payload.contact_types.enterprise_friends,
+          enterprise_groups: payload?.contact_types?.enterprise_groups == null ? null : !!payload.contact_types.enterprise_groups,
           officials: payload?.contact_types?.officials == null ? true : !!payload.contact_types.officials,
           official_subscriptions: payload?.contact_types?.official_subscriptions == null ? null : !!payload.contact_types.official_subscriptions,
           official_services: payload?.contact_types?.official_services == null ? null : !!payload.contact_types.official_services,
@@ -875,12 +954,13 @@ export const useApi = () => {
   }
 
   const getMacosKeyCaptureStatus = async (params = {}) => {
-    return await request('/macos-key-capture/status', params?.signal ? { signal: params.signal } : {})
+    return await request('/macos-key-capture/status', { retry: 0, timeout: 3000, ...(params?.signal ? { signal: params.signal } : {}) })
   }
 
   const macosKeyCaptureRequest = async (action, params = {}) => {
     const options = {
       method: 'POST',
+      retry: 0,
       body: {
         wechat_install_path: params.wechat_install_path || null,
         db_storage_path: params.db_storage_path || null,
@@ -1067,6 +1147,21 @@ export const useApi = () => {
     return await request('/system/cdn_image/status' + (q ? `?account=${encodeURIComponent(q)}` : ''))
   }
 
+  // WxCDN 套餐 / 额度 / 兑换（后端 routers/cdn.py）
+  const getCdnPlan = async (account = '', { refresh = false } = {}) => {
+    const params = new URLSearchParams()
+    if (String(account || '').trim()) params.set('account', String(account).trim())
+    if (refresh) params.set('refresh', 'true')
+    const q = params.toString()
+    return await request('/cdn/plan' + (q ? `?${q}` : ''))
+  }
+  const connectCdn = async (account = '') => {
+    return await request('/cdn/connect', { method: 'POST', body: { account: String(account || '').trim() } })
+  }
+  const redeemCdnCode = async (account, code) => {
+    return await request('/cdn/redeem', { method: 'POST', body: { account: String(account || '').trim(), code: String(code || '') } })
+  }
+
   const toggleCdnImage = async (enabled) => {
     return await request('/system/cdn_image/toggle', {
       method: 'POST',
@@ -1081,6 +1176,9 @@ export const useApi = () => {
     toggleImgHelper,
     getCdnImageStatus,
     toggleCdnImage,
+    getCdnPlan,
+    connectCdn,
+    redeemCdnCode,
     detectWechat,
     detectCurrentAccount,
     decryptDatabase,
@@ -1110,6 +1208,9 @@ export const useApi = () => {
     listSnsUsers,
     syncSnsRealtimeLatest,
     getSnsSnapshotStatus,
+    startSnsFullSync,
+    getSnsFullSyncStatus,
+    cancelSnsFullSync,
     openChatMediaFolder,
     downloadChatEmoji,
     saveMediaKeys,
@@ -1120,6 +1221,9 @@ export const useApi = () => {
     setVoiceTranscriptionDevice,
     setVoiceTranscriptionModel,
     downloadVoiceTranscriptionModel,
+    prepareQwenGpu,
+    pauseQwenGpu,
+    getQwenGpuStatus,
     getVoiceTranscriptionModelDownload,
     deleteVoiceTranscriptionModel,
     transcribeChatVoice,
@@ -1143,6 +1247,7 @@ export const useApi = () => {
     cancelSnsExport,
     listChatContacts,
     getChatContactProfile,
+    getChatGroupMembers,
     exportChatContacts,
     createAccountArchiveExport,
     getAccountArchiveExport,

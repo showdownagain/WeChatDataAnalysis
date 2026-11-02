@@ -3,7 +3,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-UNAVAILABLE_MESSAGE = "当前环境无法完成此操作，请联系开发者协助处理。"
 
 
 class TestChatEditSurfaceFrontend(unittest.TestCase):
@@ -27,34 +26,35 @@ class TestChatEditSurfaceFrontend(unittest.TestCase):
         ):
             self.assertNotIn(label, overlays)
 
-    def test_modify_text_closes_the_menu_and_only_shows_generic_error(self):
+    def test_modify_text_closes_the_menu_and_opens_advanced_features(self):
         editing = (ROOT / "frontend" / "composables" / "chat" / "useChatEditing.js").read_text(
             encoding="utf-8"
         )
         overlays = (ROOT / "frontend" / "components" / "chat" / "ChatOverlays.vue").read_text(
             encoding="utf-8"
         )
+        app = (ROOT / "frontend" / "app.vue").read_text(encoding="utf-8")
+        advanced_dialog = (ROOT / "frontend" / "composables" / "useAdvancedFeaturesDialog.js").read_text(
+            encoding="utf-8"
+        )
         handler = editing.split("const onEditMessageClick = () => {", 1)[1].split(
-            "const closeModifyTextUnavailableDialog", 1
-        )[0]
-        close_handler = editing.split("const closeModifyTextUnavailableDialog = () => {", 1)[1].split(
             "const onLocateQuotedMessageClick", 1
         )[0]
 
         self.assertIn("if (!isLikelyTextMessage(message)) return", handler)
-        self.assertIn("modifyTextUnavailableDialogOpen.value = true", handler)
+        self.assertIn("openFeatureUnavailableDialog()", handler)
         self.assertNotIn("showErrorAlert", handler)
         self.assertNotIn("window.alert", handler)
         self.assertNotIn("api.", handler)
-        self.assertLess(handler.index("closeContextMenu()"), handler.index("modifyTextUnavailableDialogOpen.value = true"))
-        self.assertIn("modifyTextUnavailableDialogOpen.value = false", close_handler)
-        self.assertIn(f"const MODIFY_TEXT_UNAVAILABLE_MESSAGE = '{UNAVAILABLE_MESSAGE}'", editing)
-        self.assertIn(UNAVAILABLE_MESSAGE, editing)
-        self.assertIn("<GuideDialog", overlays)
-        self.assertIn(':open="modifyTextUnavailableDialogOpen"', overlays)
-        self.assertIn(':description="modifyTextUnavailableMessage"', overlays)
-        self.assertIn('@primary="closeModifyTextUnavailableDialog"', overlays)
-        self.assertIn('@close="closeModifyTextUnavailableDialog"', overlays)
+        self.assertLess(handler.index("closeContextMenu()"), handler.index("openFeatureUnavailableDialog()"))
+        self.assertIn("openDialog: openFeatureUnavailableDialog } = useAdvancedFeaturesDialog()", editing)
+        self.assertIn("useState('advanced-features-dialog-open', () => false)", advanced_dialog)
+        self.assertIn("open.value = true", advanced_dialog)
+        self.assertIn("open.value = false", advanced_dialog)
+        self.assertIn("<AdvancedFeaturesDialog", app)
+        self.assertIn(':open="advancedFeaturesDialogOpen"', app)
+        self.assertIn('@close="closeAdvancedFeaturesDialog"', app)
+        self.assertNotIn("modifyTextUnavailableDialogOpen", overlays)
 
         for symbol in (
             "editChatMessage",

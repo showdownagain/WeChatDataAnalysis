@@ -35,8 +35,6 @@ class TestEnvFilePath(unittest.TestCase):
             with patch.object(runtime_settings.sys, "frozen", True, create=True):
                 self.assertIsNone(runtime_settings.get_env_file_path())
                 self.assertIsNone(runtime_settings.write_backend_port_env_file(12345))
-                self.assertIsNone(runtime_settings.write_backend_host_env_file("0.0.0.0"))
-                self.assertIsNone(runtime_settings.write_mcp_token_env_file("t" * 32))
             self.assertFalse((cwd / ".env").exists())
 
     def test_explicit_env_file_override_wins_even_when_frozen(self):

@@ -23,6 +23,7 @@ from .path_fix import PathFixRoute
 from .chat_realtime_autosync import CHAT_REALTIME_AUTOSYNC
 from .sns_realtime_autosync import SNS_REALTIME_AUTOSYNC
 from .routers.chat import router as _chat_router
+from .routers.chat_realtime_sse import router as _chat_realtime_sse_router
 from .routers.chat_contacts import router as _chat_contacts_router
 from .routers.chat_export import router as _chat_export_router
 from .routers.chat_media import router as _chat_media_router
@@ -33,7 +34,6 @@ from .routers.admin import router as _admin_router
 from .routers.account_archive_export import router as _account_archive_export_router
 from .routers.keys import router as _keys_router
 from .routers.media import router as _media_router
-from .routers.mcp import router as _mcp_router
 from .routers.sns import router as _sns_router
 from .routers.sns_export import router as _sns_export_router
 from .routers.wechat_detection import router as _wechat_detection_router
@@ -51,6 +51,7 @@ from .wcdb_realtime import WCDB_REALTIME, shutdown as _wcdb_shutdown
 from .img_helper import IMG_HELPER
 from .routers.biz import router as _biz_router
 from .routers.system import router as _system_router
+from .routers.cdn import router as _cdn_router
 
 app = FastAPI(
     title="微信数据库解密工具",
@@ -134,8 +135,8 @@ app.include_router(_import_decrypted_router)
 app.include_router(_decrypt_router)
 app.include_router(_keys_router)
 app.include_router(_media_router)
-app.include_router(_mcp_router)
 app.include_router(_chat_router)
+app.include_router(_chat_realtime_sse_router)
 app.include_router(_chat_contacts_router)
 app.include_router(_chat_export_router)
 app.include_router(_chat_media_router)
@@ -147,6 +148,7 @@ app.include_router(_general_router)
 app.include_router(_favorites_router)
 app.include_router(_record_export_router)
 app.include_router(_system_router)
+app.include_router(_cdn_router)
 
 
 # Python's MIME database inherits Windows registry overrides.  Keep the
@@ -281,8 +283,12 @@ async def _startup_background_jobs() -> None:
         logger.exception("Failed to start realtime autosync service")
     try:
         SNS_REALTIME_AUTOSYNC.start()
-    except Exception:
+    except Exception as exc:
         logger.exception("Failed to start SNS realtime autosync service")
+        logger.error(
+            "[sns.incremental-sync] status=error phase=service-start error_type=%s",
+            type(exc).__name__,
+        )
 
 
 @app.on_event("shutdown")
@@ -334,9 +340,9 @@ if __name__ == "__main__":
     import uvicorn
 
     from .native_core_client import configure_native_core_entrypoint
-    from .runtime_settings import read_effective_backend_port
+    from .runtime_settings import default_backend_host, read_effective_backend_port
 
     configure_native_core_entrypoint()
-    host = os.environ.get("WECHAT_TOOL_HOST", "127.0.0.1")
+    host = os.environ.get("WECHAT_TOOL_HOST", default_backend_host())
     port, _ = read_effective_backend_port(default=10392)
-    uvicorn.run(app, host=host, port=port)
+    uvicorn.run(app, host=host, port=port, log_config=None)

@@ -1,386 +1,270 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WeChatDataAnalysis — 你的微信数据，由你留存</title>
-  <meta name="description" content="微信 4.x 数据库解密与分析工具：高仿微信界面、实时消息、朋友圈、全文搜索、聊天记录导出与年度总结，100% 本地离线运行，Windows 与 macOS 双平台。" />
-  <meta property="og:title" content="WeChatDataAnalysis — 你的微信数据，由你留存" />
-  <meta property="og:description" content="解密 · 浏览 · 搜索 · 导出 · 年度总结，全部在你自己的电脑上完成。Windows &amp; macOS 双平台。" />
-  <meta property="og:type" content="website" />
-  <link rel="icon" href="assets/img/logo.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;900&family=JetBrains+Mono:wght@400;600&family=Noto+Serif+SC:wght@900&family=Noto+Sans+SC:wght@500;700;900&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="assets/css/main.css" />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>你的微信数据，由你留存</title>
+<meta name="description" content="微信 4.x 数据库解密与分析工具：高仿微信界面、实时消息、朋友圈、全文搜索、聊天记录导出与年度总结，100% 本地离线运行，Windows 与 macOS 双平台。">
+<meta property="og:title" content="你的微信数据，由你留存">
+<meta property="og:description" content="解密 · 浏览 · 搜索 · 导出 · 年度总结，全部在你自己的电脑上完成。Windows &amp; macOS 双平台。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://lifearchiveproject.github.io/WeChatDataAnalysis/">
+<meta name="twitter:card" content="summary">
+<link rel="canonical" href="https://lifearchiveproject.github.io/WeChatDataAnalysis/">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#f4f4f7">
+<!-- 主题（浅 / 深）：放在样式表之前，首帧前就定好 <html data-theme>——先看记住的选择（localStorage wda.theme：light | dark），没有就跟随系统；
+     同步改上面两个 meta（地址栏颜色、默认画布与滚动条），深色访客不先闪一下白。点击切换、跟随系统变化见 main.js 第 6b 节；读不到存储就跟随系统 -->
+<script>(function () { var t = null, r = document.documentElement, m; try { t = localStorage.getItem("wda.theme"); } catch (e) { t = null; } if (t !== "light" && t !== "dark") { try { t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; } catch (e) { t = "light"; } } r.setAttribute("data-theme", t); m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute("content", t === "dark" ? "#0c0e18" : "#f4f4f7"); m = document.querySelector('meta[name="color-scheme"]'); if (m) m.setAttribute("content", t); })();</script>
+<link rel="icon" href="data:,">
+<!-- 字体自托管（Geist / Geist Mono，SIL OFL 1.1，见 assets/fonts/OFL.txt）：不依赖境外字体服务，渲染也不等它 -->
+<link rel="preload" href="assets/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/css/main.css?v=e4844f65faab">
+<link rel="modulepreload" href="assets/js/data.js">
+<link rel="modulepreload" href="assets/js/card.js">
+<link rel="modulepreload" href="assets/js/compare.js?v=6a609d5f0fd9">
+<script>window.__errs = []; addEventListener("error", function (e) { __errs.push(String(e.message)); }); addEventListener("unhandledrejection", function (e) { __errs.push(String(e.reason)); });</script>
+<script type="module" src="assets/js/main.js?v=159e2cfd781c"></script>
 </head>
-<body class="is-loading">
+<body>
+<a class="skip" href="#main">跳到正文</a>
 
-  <!-- ═══════════ PRELOADER ═══════════ -->
-  <div id="loader" aria-hidden="true">
-    <canvas id="loader-hex"></canvas>
-    <div class="loader__center">
-      <p class="loader__toplabel mono">WECHATDATAANALYSIS — DECRYPT SEQUENCE</p>
-      <p class="loader__keylabel mono"><span class="tick"></span>AES-256 KEY · 64 HEX<span class="tick"></span></p>
-      <p class="loader__key mono" id="loader-key" aria-hidden="true"></p>
-      <div class="loader__line"><i id="loader-fill"></i></div>
-      <div class="loader__meta mono">
-        <span id="loader-status">locating db_storage …</span>
-        <span class="loader__pnum"><span id="loader-num">000</span>%</span>
+<!-- 状态符号与图标（不用 display:none，否则 <use> 和渐变取不到） -->
+<svg class="sprite" aria-hidden="true" width="0" height="0" focusable="false">
+  <defs>
+    <!-- 支持状态：蓝色光泽圆勾 -->
+    <linearGradient id="g-yes" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7cc9ff"/><stop offset="1" stop-color="#2f86f0"/></linearGradient>
+    <symbol id="st-yes" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="url(#g-yes)"/><ellipse cx="12" cy="6.4" rx="6.6" ry="3.4" fill="#fff" opacity=".28"/><path d="M7.3 12.4l3.1 3.1 6.2-6.7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-tg" viewBox="0 0 24 24"><path fill="currentColor" d="M21.9 4.3 18.7 19.4c-.24 1.06-.87 1.32-1.76.82l-4.86-3.58-2.35 2.26c-.26.26-.48.48-.98.48l.35-4.96 9.02-8.15c.39-.35-.09-.54-.61-.2L6.36 13.1l-4.8-1.5c-1.04-.33-1.06-1.04.22-1.54L20.55 2.8c.87-.32 1.63.2 1.35 1.5z"/></symbol>
+    <symbol id="i-ext" viewBox="0 0 24 24"><path d="M8 16 16 8M9.5 8H16v6.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <!-- 红包与转账：红包（信封 + 金色封口圆章）、转账（圆圈里一对来回箭头），配色由所在卡片给 currentColor -->
+    <symbol id="i-rp" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="4.5" y="2.5" width="15" height="19" rx="2.4"/><path d="M4.8 7.6c2.2 1.9 4.6 2.8 7.2 2.8s5-.9 7.2-2.8"/></g><circle cx="12" cy="10.6" r="2.6" fill="currentColor"/></symbol>
+    <symbol id="i-transfer" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M7.5 10h9l-2.6-2.6M16.5 14h-9l2.6 2.6"/></g></symbol>
+    <!-- 「电脑、手机都生效」小签里的电脑与手机（高级功能消息修改、消息补录两组）；同上面几只的细线画法 -->
+    <symbol id="i-pc" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="12" rx="1.5"/><path d="M12 16.5V20M8.5 20h7"/></g></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="2.8" width="11" height="18.4" rx="2.2"/><path d="M11 17.6h2"/></g></symbol>
+    <!-- 主题按钮：太阳（深色时显示，点了切浅色）、月亮（浅色时显示，点了切深色）；同上面几只的细线画法 -->
+    <symbol id="i-sun" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.6v2.1M12 19.3v2.1M2.6 12h2.1M19.3 12h2.1M5.35 5.35l1.5 1.5M17.15 17.15l1.5 1.5M5.35 18.65l1.5-1.5M17.15 6.85l1.5-1.5"/></g></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.2 14.6A8.4 8.4 0 0 1 9.4 3.8a8.4 8.4 0 1 0 10.8 10.8Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  </defs>
+</svg>
+
+<!-- ───────── 导航：全宽细条（品牌 | 两个锚点 + 更新日志页 | 主题按钮 + 主按钮），内容宽度与下方区块同一个 .wrap ───────── -->
+<header class="nav" id="nav">
+  <div class="nav__in wrap">
+    <a class="nav__brand" href="#top" aria-label="首页"><span>首页</span></a>
+    <nav class="nav__links" aria-label="页面导航">
+      <a href="#compare" data-nav="compare">高级功能</a>
+      <a href="#get" data-nav="get">获取</a>
+      <a href="changelog">更新日志</a>
+    </nav>
+    <div class="nav__act">
+      <!-- 主题按钮（>900；≤900 收起，从菜单里的「深色模式」切）：两只图标都在，CSS 按 data-theme 显示其一；aria-label 由 main.js 第 6b 节随状态改 -->
+      <button class="nav__theme" type="button" data-theme-toggle aria-label="切换到深色模式"><svg class="ic ic--moon" aria-hidden="true"><use href="#i-moon"/></svg><svg class="ic ic--sun" aria-hidden="true"><use href="#i-sun"/></svg></button>
+      <a class="btn btn--pri nav__cta" href="#get">免费试用</a>
+      <button class="nav__menu" type="button" aria-expanded="false" aria-controls="menu" aria-label="打开菜单"><i></i><i></i></button>
+    </div>
+  </div>
+  <div class="menu" id="menu" hidden>
+    <nav class="menu__links wrap" aria-label="页面导航（手机）">
+      <a href="#compare" data-nav="compare"><em>01</em>高级功能<svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+      <a href="#get" data-nav="get"><em>02</em>获取<svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+      <a href="changelog"><em>03</em>更新日志<svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+    </nav>
+    <div class="menu__pref wrap">
+      <button class="menu__theme" type="button" role="switch" aria-checked="false" data-theme-toggle><em><svg class="ic" aria-hidden="true"><use href="#i-moon"/></svg></em>深色模式<i aria-hidden="true"></i></button>
+    </div>
+    <div class="menu__cta wrap">
+      <a class="btn btn--pri" href="#get">免费试用高级版</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <!-- ───────── 开场：左文右卡 ───────── -->
+  <section class="hero" id="top" aria-labelledby="hero-h">
+    <div class="hero__in wrap">
+      <p class="hero__eyebrow"><span class="pro">PRO</span>高级版<a class="hero__upd" href="changelog" data-latest hidden>最近更新 <b></b><svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg></a></p>
+      <div class="hero__copy">
+        <h1 class="hero__h" id="hero-h">不止能读还能写</h1>
+        <p class="hero__sub">提供&nbsp;<span data-pro-total data-pro-at="hero-sub">108</span>&nbsp;项高级功能，外加人工支持；注册送&nbsp;1&nbsp;天试用。</p>
+        <div class="hero__cta">
+          <!-- 主按钮光效（main.css「开场主按钮」、main.js 第 0b 节）：.fx 整块是装饰（aria-hidden），垫在文字下面；链接与行为不变 -->
+          <a class="btn btn--l btn--fx" href="#get" data-fx><span class="fx" aria-hidden="true"><span class="fx__out"><span class="fx__ref"><span class="fx__aur"><b></b><b></b><b></b></span></span></span><span class="fx__rim"></span><span class="fx__face"><span class="fx__pan"></span><span class="fx__ref"></span></span></span>免费试用高级版</a>
+        </div>
+      </div>
+      <div class="hero__stage">
+        <!-- 卡面照搬样张甲：assets/js/card.js 在 canvas 上画（2D，不用 WebGL），倾斜时全息章换成单独的一小块（有视差）；卡上的数字取自下面这行读屏文字。
+             跟手倾斜、光泽、柔影与扫光见 main.js「开场卡面」一节 -->
+        <figure class="card" id="card">
+          <div class="card__tilt" aria-hidden="true">
+            <span class="card__shade"></span>
+            <canvas class="card__cv" width="1024" height="646"></canvas>
+            <canvas class="card__patch" width="176" height="176"></canvas>
+            <canvas class="card__seal" width="176" height="176"></canvas>
+            <div class="card__shine"><span class="card__holo"></span><span class="card__sweep"></span></div>
+            <div class="card__glint"><span class="card__glare"></span></div>
+          </div>
+          <figcaption class="vh">高级版卡片：<span data-pro-groups>13</span> 组 <span data-pro-total data-pro-at="hero-card">108</span> 项高级功能，注册送 1 天试用</figcaption>
+        </figure>
       </div>
     </div>
-    <div class="loader__corner mono tl">WECHAT&nbsp;DATA&nbsp;ANALYSIS</div>
-    <div class="loader__corner mono tr">AES-256 · SQLCIPHER</div>
-    <div class="loader__corner mono bl">LIFEARCHIVEPROJECT</div>
-    <div class="loader__corner mono br">LOCAL&nbsp;/&nbsp;OFFLINE</div>
-    <div class="loader__panel top"></div>
-    <div class="loader__panel bottom"></div>
-  </div>
+  </section>
 
-  <!-- ═══════════ GLOBAL CHROME ═══════════ -->
-  <canvas id="gl"></canvas>
-  <div class="grain" aria-hidden="true"></div>
-  <div class="cursor" aria-hidden="true">
-    <i class="cursor__c tl"></i><i class="cursor__c tr"></i><i class="cursor__c bl"></i><i class="cursor__c br"></i>
-    <span class="cursor__label mono"></span>
-  </div>
-  <div class="cursor-dot" aria-hidden="true"></div>
-  <span class="cursor-addr mono" id="cursor-addr" aria-hidden="true"></span>
+  <!-- 全部高级功能（默认折叠） -->
+  <section class="all" id="all" aria-label="全部高级功能">
+    <details class="wrap" id="all-d">
+      <summary><span>全部高级功能</span><em>按类别 · 每条一句</em><svg class="ic" aria-hidden="true"><use href="#i-down"/></svg></summary>
+      <div class="all__cols" id="all-cols"></div>
+    </details>
+  </section>
 
-  <header class="nav" id="nav">
-    <a class="nav__brand" href="#hero" data-cursor="hover">
-      <img src="assets/img/logo.png" alt="" class="nav__logo" />
-      <span class="nav__word mono">WeChatDataAnalysis</span>
-    </a>
-    <div class="nav__links">
-      <a class="nav__gh mono" data-cursor="hover" href="https://github.com/LifeArchiveProject/WeChatDataAnalysis" target="_blank" rel="noopener">
-        <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-        <span id="gh-stars">GitHub</span>
-      </a>
-      <a class="nav__dl mono" data-cursor="hover" href="https://github.com/LifeArchiveProject/WeChatDataAnalysis/releases/latest" target="_blank" rel="noopener">下载 ↓</a>
+  <!-- 高级功能：单列展示，分组条目由 compare.js 填入，吸顶标题随区块结束收起。 -->
+  <section class="cmp" id="compare" aria-labelledby="cmp-h">
+    <div class="cmp__in wrap">
+      <div class="cmp__top">
+        <h2 id="cmp-h">高级功能</h2>
+        <p class="cmp__p">消息管理、在线操作与自动化功能，按类别完整展示。</p>
+      </div>
+      <div class="cmp__tbl" id="cmp-tbl">
+        <span class="cmp__pin" aria-hidden="true"></span>
+        <div class="cmp__bar" id="cmp-bar">
+          <div class="cb cb--pro">
+            <span class="cb__face" aria-hidden="true"><span class="vc__film"></span><span class="vc__frame"></span><span class="vc__edge"></span></span>
+            <h3 class="cb__n">高级版<span class="pro">PRO</span></h3>
+            <a class="btn btn--pri" href="https://t.me/+IQKBDeXtaKozZWYx" target="_blank" rel="noopener" aria-label="进 Telegram 群下载高级版，免费试用 1 天"><svg class="ic" aria-hidden="true"><use href="#i-tg"/></svg><span class="cb__m">高级版</span>免费试用<span class="cb__d">&nbsp;1 天</span></a>
+          </div>
+        </div>
+        <div class="cmp__duo" id="cmp-duo">
+          <div class="vc vc--pro" aria-hidden="true"><div class="vc__film"></div><div class="vc__sheen"></div><div class="vc__frame"></div></div>
+
+          <!-- 卡顶：功能总数与全息卡面 -->
+          <div class="r r--hero">
+            <div class="r__p"><p class="hk">高级版功能一览</p><p class="vc__big"><b data-pro-total data-pro-at="compare-big">108</b><span>项高级功能<small><span data-pro-groups>13</span> 组 · 注册送 1 天试用</small></span></p>
+              <div class="vc__art" aria-hidden="true"><canvas class="vc__rose" width="0" height="0"></canvas><div class="vc__seal"><div class="vc__seal-c"></div><div class="vc__seal-r"></div><svg viewBox="-50 -50 100 100"><path d="M0 -46Q6 -6 46 0Q6 6 0 46Q-6 6 -46 0Q-6 -6 0 -46Z" fill="#fff"/></svg></div></div></div>
+          </div>
+
+          <!-- 基础功能：六项名称与说明 -->
+          <div class="r r--both" data-i="both">
+            <div class="r__p"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c">6</b><span class="p__n">基础功能</span><small class="p__u">项</small></p>
+              <dl class="p__defs"><div><dt>解密</dt><dd>数据库解密，支持微信 4.x。</dd></div><div><dt>浏览</dt><dd>聊天记录浏览，新消息实时同步。</dd></div><div><dt>搜索</dt><dd>聊天记录全文搜索。</dd></div><div><dt>朋友圈·收藏</dt><dd>朋友圈、收藏、小程序、视频号直播都能浏览。</dd></div><div><dt>导出</dt><dd>10 类内容导出：HTML / JSON / TXT / Excel，另有账号数据归档 ZIP。</dd></div><div><dt>年度总结</dt><dd>一年的聊天数据做成年度总结。</dd></div></dl></div>
+          </div>
+
+          <!-- 高级功能：13 组 108 项 -->
+          <div class="r r--sec"><div class="r__p"><p><span>高级功能</span><em><b data-pro-total data-pro-at="compare">108</b> 项</em></p></div></div>
+          <div class="r r--x r--g r--no" data-i="edit">
+            <div class="r__p" style="--i:0"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="edit" data-pro-at="compare">8</b><span class="p__n">消息修改</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__both"><svg class="ic" aria-hidden="true"><use href="#i-pc"/></svg><svg class="ic" aria-hidden="true"><use href="#i-phone"/></svg>电脑、手机都生效</span><span class="p__t">直接改写<wbr>本机消息，改过头了<wbr>可一键恢复<wbr>原消息。</span></p><ul class="p__its" data-items="edit"></ul></div>
+          </div>
+          <div class="r r--x r--g r--no" data-i="add">
+            <div class="r__p" style="--i:1"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="add" data-pro-at="compare">17</b><span class="p__n">消息补录</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__both"><svg class="ic" aria-hidden="true"><use href="#i-pc"/></svg><svg class="ic" aria-hidden="true"><use href="#i-phone"/></svg>电脑、手机都生效</span><span class="p__t">在任意位置<wbr>补录 <span data-pro-count="add" data-pro-at="compare-d">17</span>&nbsp;类消息。</span></p><ul class="p__its" data-items="add"></ul></div>
+          </div>
+          <div class="r r--x r--g r--no" data-i="ai-mcp">
+            <div class="r__p" style="--i:2"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="ai-mcp" data-pro-at="compare">2</b><span class="p__n">AI 与 MCP</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">AI 助手围绕聊天记录<wbr>问答、总结，回答<wbr>带消息出处；MCP 让&nbsp;AI 客户端<wbr>接入聊天数据。</span></p><ul class="p__its" data-items="ai-mcp"></ul></div>
+          </div>
+          <div class="r r--x r--g r--no" data-i="action">
+            <div class="r__p" style="--i:3"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="action" data-pro-at="compare">22</b><span class="p__n">微信动作</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">发消息、文件、名片<wbr>与各类卡片，引用回复、撤回、<wbr>分组发图，以及<wbr>收消息<wbr>与历史补拉。</span></p><ul class="p__its" data-items="action"></ul></div>
+          </div>
+          <div class="r r--x r--g r--no r--money" data-i="red-packet">
+            <div class="r__p" style="--i:4"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="red-packet" data-pro-at="compare">4</b><span class="p__n">红包与转账</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">在电脑上<wbr>直接领红包、收转账，<wbr>没收的转账<wbr>可以退还；另可查看<wbr>群红包领取明细。</span></p><ul class="p__its" data-items="red-packet"></ul></div>
+          </div>
+          <div class="r r--x r--g r--part" data-i="moments">
+            <div class="r__p" style="--i:5"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="moments" data-pro-at="compare">8</b><span class="p__n">朋友圈</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">同步最新、点赞、评论<wbr>与回复，图文或视频<wbr>发圈与删除。</span></p><ul class="p__its" data-items="moments"></ul></div>
+          </div>
+          <div class="r r--x r--g r--no" data-i="group">
+            <div class="r__p" style="--i:6"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="group" data-pro-at="compare">14</b><span class="p__n">群聊</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">建群、改群名与备注、<wbr>发群公告与接龙、<wbr>拉人进群<wbr>与移除成员。</span></p><ul class="p__its" data-items="group"></ul></div>
+          </div>
+          <div class="r r--x r--g r--part" data-i="contact">
+            <div class="r__p" style="--i:7"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="contact" data-pro-at="compare">11</b><span class="p__n">联系人</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">改备注、加删好友、标签管理<wbr>与找人。</span></p><ul class="p__its" data-items="contact"></ul></div>
+          </div>
+          <div class="r r--x r--g r--no" data-i="search">
+            <div class="r__p" style="--i:8"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="search" data-pro-at="compare">9</b><span class="p__n">内容搜索</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">在线搜索<wbr>公众号、服务号、小程序、<wbr>视频号与直播；公众号文章<wbr>可整号下载。</span></p><ul class="p__its" data-items="search"></ul></div>
+          </div>
+          <div class="r r--x r--g r--part" data-i="finder">
+            <div class="r__p" style="--i:9"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="finder" data-pro-at="compare">4</b><span class="p__n">视频号与直播</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">在线浏览作品、评论<wbr>与关注列表，关注、<wbr>点赞、评论，进直播间<wbr>发言点赞。</span></p><ul class="p__its" data-items="finder"></ul></div>
+          </div>
+          <div class="r r--x r--g r--part" data-i="miniapp">
+            <div class="r__p" style="--i:10"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="miniapp" data-pro-at="compare">5</b><span class="p__n">小程序</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">发送小程序卡片，<wbr>登录授权、数据请求，<wbr>链接与小程序码<wbr>解析识别。</span></p><ul class="p__its" data-items="miniapp"></ul></div>
+          </div>
+          <div class="r r--x r--g r--no" data-i="automation">
+            <div class="r__p" style="--i:11"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="automation" data-pro-at="compare">3</b><span class="p__n">自动化任务</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">定时群发、新好友<wbr>自动处理<wbr>与朋友圈跟圈。</span></p><ul class="p__its" data-items="automation"></ul></div>
+          </div>
+          <div class="r r--x r--g r--part" data-i="mac-key">
+            <div class="r__p" style="--i:12"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><b class="p__c" data-pro-count="mac-key" data-pro-at="compare">1</b><span class="p__n">macOS 取密钥</span><small class="p__u">项</small></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">100% 获取<wbr>数据库密钥，不限制<wbr>微信版本，不用关闭&nbsp;SIP，<wbr>不重签、不&nbsp;Hook&nbsp;微信。</span></p><ul class="p__its" data-items="mac-key"></ul></div>
+          </div>
+          <!-- 体验与服务：左状态 + 短说明，右完整说明 -->
+          <div class="r r--sec r--sec-e"><div class="r__p"><p><span>体验与服务</span><em><b>8</b> 项</em></p></div></div>
+          <div class="r r--x r--e r--no" data-i="e0">
+            <div class="r__p"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__n">全新界面</span></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">默认新版协作风格，从聊天到设置<wbr>整套重做，可切回经典。</span></p></div>
+          </div>
+          <div class="r r--x r--e r--no" data-i="e1">
+            <div class="r__p"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__n">动态小黄脸</span></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t"><b>109</b>&nbsp;个表情动画，纯表情消息<wbr>自动播放一次，点一下重播。</span></p></div>
+          </div>
+          <div class="r r--x r--e r--no" data-i="e2">
+            <div class="r__p"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__n">表情面板</span></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t"><b>146</b>&nbsp;个微信表情<wbr>含老表情，点一下就能发。</span></p></div>
+          </div>
+          <div class="r r--x r--e r--no" data-i="e3">
+            <div class="r__p"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__n">实况照片</span></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">聊天里的实况照片<wbr>悬停播放原视频，可开关声音。</span></p></div>
+          </div>
+          <div class="r r--x r--e r--no" data-i="e4">
+            <div class="r__p"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__n">AI 工作台</span></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">整页工作台、任务中心、AI&nbsp;接管回复（按会话手动开启，回复时对方消息<wbr>会发给你选的&nbsp;AI&nbsp;服务）、执行微信动作、<b>100</b>&nbsp;个子代理、<b>40+</b>&nbsp;模型预设。</span></p></div>
+          </div>
+          <div class="r r--x r--e r--part" data-i="e5">
+            <div class="r__p"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__n">实时消息接收</span></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">独立接收新消息，状态条显示<wbr>补拉进度与<wbr>平均接收延迟。</span></p></div>
+          </div>
+          <div class="r r--x r--e r--part" data-i="e6">
+            <div class="r__p"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__n">人工支持</span></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">卡住时<wbr>一键找到客服入口，订单凭订单号售后，另有<wbr>会员专属&nbsp;Telegram&nbsp;群；根据用户反馈<wbr>持续迭代。</span></p></div>
+          </div>
+          <div class="r r--x r--e r--no" data-i="e7">
+            <div class="r__p"><p class="p__h"><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__n">1 天试用</span></p><p class="p__d"><span class="lab lab--pro">高级版</span><svg class="st" role="img" aria-label="支持"><use href="#st-yes"/></svg><span class="p__t">进&nbsp;Telegram&nbsp;群下载<wbr>对应系统的安装包，注册即送&nbsp;<b>1</b>&nbsp;天试用。</span></p></div>
+          </div>
+
+          <!-- 平台与微信版本 -->
+          <div class="r r--env r--env1" data-i="v0">
+            <div class="r__p"><p class="p__h"><span class="p__n">平台</span></p><p class="p__d"><span class="lab lab--pro">高级版</span><b class="p__v">Windows · macOS · Linux</b><span class="p__t">Linux&nbsp;版只含读取与导出，不含微信动作<wbr>和语音转文字；网页版可用 Linux&nbsp;离线包、Docker 或 nginx&nbsp;部署。</span></p></div>
+          </div>
+          <div class="r r--env r--env2" data-i="v1">
+            <div class="r__p"><p class="p__h"><span class="p__n">微信版本</span></p><p class="p__d"><span class="lab lab--pro">高级版</span><b class="p__v">不限制微信版本</b><span class="p__t">在线功能<wbr>独立登录微信账号，不依赖<wbr>本机微信客户端版本。</span></p></div>
+          </div>
+          <div class="r r--foot"><div class="r__p"><p>高级版能力需在会员或试用期内使用；到期后已有记录仍可查看、搜索和导出。</p></div></div>
+        </div>
+        <span class="cmp__end" aria-hidden="true"></span>
+      </div>
     </div>
-  </header>
+  </section>
 
-  <aside class="rail" aria-hidden="true">
-    <div class="rail__idx mono"><span id="rail-cur">01</span><em>/ 07</em></div>
-    <div class="rail__line"><i id="rail-fill"></i></div>
-  </aside>
-
-  <main id="page">
-
-    <!-- ═══════════ ACT 01 · HERO ═══════════ -->
-    <section class="act hero" id="hero" data-act="01">
-      <p class="hero__vert mono" aria-hidden="true">WECHAT 4.X DATABASE — DECRYPT · BROWSE · SEARCH · EXPORT · WRAPPED</p>
-      <p class="hero__coord mono" aria-hidden="true">
-        <span id="hc-1">DB — AES-256 · SQLCIPHER COMPAT</span>
-        <span id="hc-2">KEY — 64 HEX · MEMORY SCAN</span>
-        <span id="hc-3">RUNTIME — 100% LOCAL · 0 UPLOAD</span>
-        <span id="hc-4">PLATFORM — WIN &amp; MAC · SINCE 2.0</span>
-      </p>
-      <h1 class="hero__title">
-        <i class="hero__decrypt" aria-hidden="true"></i>
-        <span class="ht-line ht-line--1"><span class="ht-mask">你的聊天记录</span></span>
-        <span class="ht-line ht-line--2"><span class="ht-mask">本就属于<em>你</em></span></span>
-      </h1>
-      <p class="hero__sub mono" id="hero-scramble">解密 · 浏览 · 搜索 · 导出 · 年度总结 —— 全部离线完成</p>
-      <div class="hero__cta">
-        <a class="hero__orb" data-magnetic data-cursor="hover" href="https://github.com/LifeArchiveProject/WeChatDataAnalysis/releases/latest" target="_blank" rel="noopener">
-          <svg class="hero__orb-ring" viewBox="0 0 200 200"><circle cx="100" cy="100" r="97" fill="none" stroke="currentColor" stroke-width="1" /></svg>
-          <span>下载<i class="mono">WIN / MAC</i></span>
-        </a>
-        <a class="hero__gh mono" data-cursor="hover" href="https://github.com/LifeArchiveProject/WeChatDataAnalysis" target="_blank" rel="noopener">GitHub · 阅读源码 <i>↗</i></a>
-        <p class="hero__plat mono" aria-label="支持 Windows 与 macOS，2.0 版本起">
-          <svg class="hp-ic" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M0 3.45 9.75 2.1v9.45H0V3.45ZM10.95 1.95 24 0v11.4H10.95V1.95ZM0 12.6h9.75v9.45L0 20.7V12.6Zm10.95 0H24V24l-13.05-1.8V12.6Z"/></svg><b>WINDOWS</b>
-          <i>×</i>
-          <svg class="hp-ic hp-ic--apple" viewBox="0 0 814 1000" aria-hidden="true"><path fill="currentColor" d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76.5 0-103.7 40.8-165.9 40.8s-105.6-57-155.5-127C46.7 790.7 0 663 0 541.8c0-194.4 126.4-297.5 250.8-297.5 66.1 0 121.2 43.4 162.7 43.4 39.5 0 101.1-46 176.3-46 28.5 0 130.9 2.6 198.3 99.2zm-234-181.5c31.1-36.9 53.1-88.1 53.1-139.3 0-7.1-.6-14.3-1.9-20.1-50.6 1.9-110.8 33.7-147.1 75.8-28.5 32.4-55.1 83.6-55.1 135.5 0 7.8 1.3 15.6 1.9 18.1 3.2.6 8.4 1.3 13.6 1.3 45.4 0 102.5-30.4 135.5-71.3z"/></svg><b>macOS</b>
-          <em>2.0 起双平台</em>
-        </p>
+  <!-- ───────── 获取 ───────── -->
+  <section class="get" id="get" aria-labelledby="get-h">
+    <div class="get__in wrap">
+      <div class="get__head">
+        <p class="eyebrow">获取</p>
+        <h2 id="get-h"><span class="nw">加入 TG 群，</span><span class="nw">下载高级版。</span></h2>
       </div>
-      <div class="hero__ticker" aria-hidden="true">
-        <div class="hero__ticker-row mono" id="hero-ticker">
-          <span>100% 本地运行</span><i>◆</i><span>开源可审计</span><i>◆</i><span>Windows &amp; macOS 双平台</span><i>◆</i><span>WCDB 实时读取</span><i>◆</i><span>SHA-256 迁移校验</span><i>◆</i><span>10 类内容 × 4 格式导出</span><i>◆</i>
-          <span>100% 本地运行</span><i>◆</i><span>开源可审计</span><i>◆</i><span>Windows &amp; macOS 双平台</span><i>◆</i><span>WCDB 实时读取</span><i>◆</i><span>SHA-256 迁移校验</span><i>◆</i><span>10 类内容 × 4 格式导出</span><i>◆</i>
+      <article class="plate plate--pro">
+        <header class="plate__h"><h3>高级版</h3><span class="pro">PRO</span></header>
+        <p class="plate__big"><b>1</b> 天免费试用</p>
+        <p class="plate__p">注册送 1 天试用。</p>
+        <dl class="plate__meta"><div><dt>平台</dt><dd>Windows · macOS · Linux</dd></div><div><dt>微信</dt><dd>不限制微信版本</dd></div><div><dt>密钥</dt><dd>macOS 100% 获取，不用关闭 SIP，不重签、不 Hook 微信</dd></div></dl>
+        <div class="plate__foot">
+          <p class="plate__note">进 Telegram 群，找到你所用系统的安装包，下载安装后注册即可试用 1 天。想买会员可<a href="https://t.me/knchudj" target="_blank" rel="noopener">私聊群所有者</a>。</p>
+          <a class="btn btn--pri btn--l" href="https://t.me/+IQKBDeXtaKozZWYx" target="_blank" rel="noopener"><svg class="ic" aria-hidden="true"><use href="#i-tg"/></svg>进 Telegram 群下载试用</a>
         </div>
-      </div>
-    </section>
+      </article>
+    </div>
+  </section>
+</main>
 
-    <!-- ═══════════ ACT 02 · MANIFESTO ═══════════ -->
-    <section class="act manifesto" id="manifesto" data-act="02">
-      <div class="manifesto__pin">
-        <div class="mf__field" id="mfield" aria-hidden="true"></div>
-        <canvas class="mf__wall" id="mwall" aria-hidden="true"></canvas>
-        <p class="m-line m-line--up" data-mline>多年的对话、照片、<br/>红包与告别，</p>
-        <p class="m-line" data-mline>都锁在一个<span class="hl">你打不开</span>的<br/>加密数据库里。</p>
-        <p class="m-line m-line--last" data-mline>直到<em>现在</em>。</p>
-      </div>
-    </section>
+<footer class="foot">
+  <div class="foot__in wrap">
+    <a class="nav__brand" href="#top"><span>返回首页</span></a>
+    <nav class="foot__links" aria-label="页脚链接">
+      <a href="changelog">更新日志</a>
+      <a href="https://t.me/+IQKBDeXtaKozZWYx" target="_blank" rel="noopener">Telegram 群</a>
+    </nav>
+    <p class="foot__legal">© 2026 · 仅限处理你本人合法持有的数据，请遵守当地法律法规 · 本项目为非官方工具，与微信、腾讯及其关联主体不存在隶属、授权、合作或认可关系。</p>
+  </div>
+</footer>
 
-    <!-- ═══════════ ACT 03 · DECRYPT ═══════════ -->
-    <section class="act decrypt" id="decrypt" data-act="03">
-      <div class="decrypt__pin">
-        <canvas class="decrypt__hex" id="hexwall"></canvas>
-
-        <div class="decrypt__hud mono">
-          <div class="dhud__left">
-            <span id="dstep-num">STEP 01 / 03</span>
-            <span id="dstep-file">key_pattern @ WeChat.exe / WeChat.app</span>
-          </div>
-          <div class="dhud__right"><span id="dpct">0.0%</span></div>
-        </div>
-
-        <h3 class="dtitle" id="dtitle">获取密钥</h3>
-        <p class="dsub" id="dsub">内存扫描自动定位 64 位数据库密钥</p>
-        <p class="dkey mono" id="dkey" aria-hidden="true"></p>
-
-        <div class="decrypt__chat" id="dchat">
-          <p class="dchat__tag mono" aria-hidden="true">message_0.db — 已解密 · READONLY</p>
-          <div class="dchat__body">
-            <p class="wc-time" data-bub>昨天 21:47</p>
-            <div class="wc-row" data-bub>
-              <span class="wc-avatar" style="--av:#5d6a75">友</span>
-              <div class="wc-bubble wc-bubble--l">到了跟我说一声</div>
-            </div>
-            <div class="wc-row wc-row--r" data-bub>
-              <span class="wc-avatar" style="--av:#07b75b">我</span>
-              <div class="wc-bubble wc-bubble--r">刚落地，还是老地方见</div>
-            </div>
-            <div class="wc-row" data-bub>
-              <span class="wc-avatar" style="--av:#5d6a75">友</span>
-              <div class="wc-bubble wc-bubble--l wc-voice">
-                <svg class="wc-voice-ic" viewBox="0 0 32 32" fill="currentColor"><path d="M10.3 11.7l-1.8 1.8c.7.7 1.1 1.6 1.1 2.5s-.4 1.9-1.1 2.5l1.8 1.8c1.1-1.1 1.8-2.6 1.8-4.3s-.7-3.2-1.8-4.3z"/><path class="voice-wave-2" d="M15.2 6.7l-1.8 1.8c1.9 1.9 3 4.5 3 7.3s-1.2 5.4-3 7.3l1.8 1.8c2.3-2.3 3.8-5.5 3.8-9.1s-1.5-6.8-3.8-9.1z"/><path class="voice-wave-3" d="M20.1 1.8l-1.8 1.8c3.1 3.2 5 7.5 5 12.3s-1.9 9.1-5 12.3l1.8 1.8c3.6-3.6 5.9-8.5 5.9-14s-2.2-10.4-5.9-14z"/></svg>
-                <span>4″</span><i class="wc-unread"></i>
-              </div>
-            </div>
-            <div class="wc-row wc-row--r" data-bub>
-              <span class="wc-avatar" style="--av:#07b75b">我</span>
-              <div class="wc-img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M3 17l5-5 4 4 3.5-3.5L21 18"/></svg></div>
-            </div>
-            <div class="wc-row" data-bub>
-              <span class="wc-avatar" style="--av:#5d6a75">友</span>
-              <div class="wc-redpacket">
-                <div class="wc-rp-main"><span class="wc-rp-ic">🧧</span><div><b>恭喜发财，大吉大利</b><i>领取红包</i></div></div>
-                <div class="wc-rp-foot">微信红包</div>
-              </div>
-            </div>
-            <div class="wc-row wc-row--r" data-bub>
-              <span class="wc-avatar" style="--av:#07b75b">我</span>
-              <div class="wc-bubble wc-bubble--r">好，就这么定了</div>
-            </div>
-          </div>
-        </div>
-
-        <ul class="ddbs mono" id="ddbs">
-          <li data-db><i></i>message_0.db</li>
-          <li data-db><i></i>contact.db</li>
-          <li data-db><i></i>session.db</li>
-          <li data-db><i></i>sns.db</li>
-          <li data-db><i></i>favorite.db</li>
-          <li data-db><i></i>media_0.db</li>
-        </ul>
-      </div>
-    </section>
-
-    <!-- ═══════════ ACT 04 · FEATURES ═══════════ -->
-    <section class="act features" id="features" data-act="04">
-      <div class="features__pin">
-        <div class="deck" id="deck">
-          <div class="deck__text">
-            <p class="deck__kicker mono"><span class="tick"></span>FEATURES · 功能全景</p>
-            <span class="deck__num" id="deck-num">01</span>
-            <h3 class="deck__name" id="deck-name">聊天记录 1:1 复刻</h3>
-            <p class="deck__desc" id="deck-desc">文本、图片、视频、语音、表情、引用、合并转发……逐一还原，样式尽可能与微信保持一致。</p>
-            <div class="deck__meta mono" id="deck-meta">全消息类型 · 时间轴跳转 · 高仿界面</div>
-            <div class="deck__dots" id="deck-dots"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-          </div>
-
-          <div class="deck__stack" id="deck-stack">
-            <div class="deck__card" data-card><img src="assets/img/message.png" alt="聊天记录页面" decoding="async" /></div>
-            <div class="deck__card" data-card><img src="assets/img/RealTimeMessages.gif" alt="实时消息同步" decoding="async" /></div>
-            <div class="deck__card" data-card><img src="assets/img/edit.gif" alt="修改消息" decoding="async" /></div>
-            <div class="deck__card" data-card><img src="assets/img/sns.png" alt="朋友圈" decoding="async" /></div>
-            <div class="deck__card" data-card><img src="assets/img/search.png" alt="聊天记录搜索" decoding="async" /></div>
-            <div class="deck__card" data-card><img src="assets/img/export.png" alt="导出" decoding="async" /></div>
-            <div class="deck__card deck__card--code" data-card><pre class="mono"><code><span class="c-dim">$</span> mcp connect <span class="c-green">127.0.0.1:10392/mcp</span>
-<span class="c-dim">›</span> Authorization: Bearer ****************
-<span class="c-dim">›</span> tools: <span class="c-green">search_messages</span> · <span class="c-green">get_contacts</span> · …
-<span class="c-ok">✓ 你的聊天档案，现在可以被 AI 提问</span></code></pre></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ═══════════ ACT 05 · WRAPPED ═══════════ -->
-    <section class="act wrapped" id="wrapped" data-act="05">
-      <div class="wrapped__pin">
-        <header class="wrapped__intro">
-          <p class="sec-tag mono"><span class="tick"></span>ANNUAL WRAPPED — 年度总结</p>
-          <h2 class="wrapped__title"><span>而这一年，</span><br/><span>值得被数据<em>温柔复述</em></span></h2>
-        </header>
-
-        <!-- 年度总结 = 展示 6 张年度卡片截图（下一个 AI 在此基础上重做呈现方式；截图 1919×868 横版，必须平铺可读、勿裁勿倾斜） -->
-        <div class="viewer" id="viewer">
-          <div class="cinema__hud mono">
-            <span class="hudl"><span class="tick"></span>WRAPPED FILM · 2025</span>
-            <span>FRAME <b id="v-idx">01</b><i>/ 06</i></span>
-          </div>
-          <figure class="viewer__frame">
-            <div class="viewer__slides" id="v-slides">
-              <img src="assets/img/AnnualSummary1.png" alt="年度总结卡片：字数统计" decoding="async" />
-              <img src="assets/img/AnnualSummary2.png" alt="年度总结卡片：赛博作息" decoding="async" />
-              <img src="assets/img/AnnualSummary3.png" alt="年度总结卡片：回复速度" decoding="async" />
-              <img src="assets/img/AnnualSummary6.png" alt="年度总结卡片：月度挚友墙" decoding="async" />
-              <img src="assets/img/AnnualSummary7.png" alt="年度总结卡片：表情宇宙" decoding="async" />
-              <img src="assets/img/AnnualSummary8.png" alt="年度总结卡片：Bento 总览" decoding="async" />
-            </div>
-          </figure>
-          <div class="cinema__foot">
-            <div class="viewer__ticks" id="v-ticks"><i></i><i></i><i></i><i></i><i></i><i></i></div>
-          </div>
-        </div>
-
-        <div class="wrapped__stats">
-          <div class="wstat"><b class="mono" data-count="137842">0</b><span>条消息，被完整找回</span></div>
-          <div class="wstat"><b class="mono" data-count-time="04:17">00:00</b><span>最晚的一次夜聊</span></div>
-          <div class="wstat"><b class="mono" data-count="26" data-suffix=" 秒">0</b><span>回复 TA 的中位速度</span></div>
-          <div class="wstat"><b class="mono" data-count="8431">0</b><span>个表情包一起走过</span></div>
-        </div>
-
-        <p class="wrapped__note mono">8 张动态卡片 — 年度总览 · 赛博作息 · 字数统计 · 回复速度 · 表情宇宙 · 月度挚友墙 · 关键词云 · Bento 总结</p>
-      </div>
-    </section>
-
-    <!-- ═══════════ ACT 06 · THE MACHINE（隐私 × 引擎室 合并）═══════════ -->
-    <section class="act machine" id="machine" data-act="06">
-      <div class="mac__pin">
-        <div class="mac__top">
-          <p class="sec-tag mono"><span class="tick"></span>THE MACHINE — 本机 · 引擎 × 隐私</p>
-          <h2 class="mac__title">解密、浏览、导出<br/>全程<em>不出这台电脑</em>。</h2>
-        </div>
-
-        <div class="mac__stage">
-          <!-- 演算台：三个动作真的在本机跑一遍 -->
-          <div class="mac__run" id="mac-run">
-            <b class="mac__act" id="mac-act">解密</b>
-            <ul class="mac__trace mono" id="mac-trace" aria-hidden="true"></ul>
-          </div>
-
-          <!-- 定格：出网恒为 0 -->
-          <div class="mac__hero" id="mac-hero">
-            <div class="mac__seal">
-              <b class="mac__zero mono" id="mac-zero">0</b>
-              <i class="mac__escapee" aria-hidden="true"></i>
-            </div>
-            <div class="mac__sealtxt">
-              <span class="mono">字节出网 · BYTES UPLOADED</span>
-              <em class="mono" id="mac-pass">✓ AUDIT PASSED · 0 EGRESS</em>
-            </div>
-          </div>
-        </div>
-
-        <!-- 两个读数：本机飞涨，出网死死为 0 -->
-        <div class="mac__meters" id="mac-meters">
-          <div class="mac__meter">
-            <span class="mono">本机处理 · PROCESSED ON THIS MACHINE</span>
-            <b class="mono" id="mac-local">0 B</b>
-          </div>
-          <div class="mac__meter mac__meter--out">
-            <span class="mono">出网 · UPLOADED</span>
-            <b class="mono" id="mac-out">0 B</b>
-          </div>
-        </div>
-
-        <ul class="mac__guards">
-          <li data-guard><b>本地运行</b><span>密钥与数据全程不出本机，不存在“云端”</span></li>
-          <li data-guard><b>开源可审计</b><span>逐行开放，`source.visibility = open`</span></li>
-          <li data-guard><b>SHA-256 校验</b><span>Win ↔ Mac 归档迁移逐文件比对</span></li>
-          <li data-guard><b>微信可卸载</b><span>解密副本永久可读，记忆不会走</span></li>
-        </ul>
-
-        <div class="mac__foot">
-          <div class="mac__specs">
-            <p class="mac__stack mono"><span>ENGINE</span>Python · FastAPI · SQLite · WCDB · Rust · Nuxt 4 · Vue 3 · Electron · uv</p>
-            <p class="mac__stack mono"><span>PLATFORM</span>Windows · macOS 15+ Apple Silicon — v2.0 起双平台</p>
-          </div>
-          <p class="mac__legal mono">仅限解密你本人的微信数据 · 请遵守当地法律法规</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- ═══════════ ACT 07 · CTA / FOOTER ═══════════ -->
-    <section class="act cta" id="cta" data-act="07">
-
-      <div class="cta__slug mono">
-        <span class="cta__slug-t"><i class="tick"></i>ACT 07 · 终章</span>
-        <i class="cta__leader" aria-hidden="true"></i>
-        <span class="cta__slug-t" id="cta-seal">FILE CLOSED · SEALED 2026</span>
-      </div>
-
-      <h2 class="cta__title">把记忆，握回<em>自己手里</em></h2>
-
-      <a class="gate" id="cta-gate" data-cursor="hover" href="https://github.com/LifeArchiveProject/WeChatDataAnalysis/releases/latest" target="_blank" rel="noopener">
-        <i class="gate__fill" aria-hidden="true"></i>
-        <i class="gate__scan" aria-hidden="true"></i>
-        <i class="gate__glow" aria-hidden="true"></i>
-        <span class="gate__row gate__row--base">
-          <b class="gate__label">开始留档</b>
-          <i class="gate__track" aria-hidden="true"><i class="gate__pip"></i></i>
-          <span class="gate__meta mono" id="gate-meta">LATEST RELEASE · WINDOWS &amp; macOS · OPEN SOURCE</span>
-          <i class="gate__arrow">↓</i>
-        </span>
-        <span class="gate__row gate__row--ink" aria-hidden="true">
-          <b class="gate__label">开始留档</b>
-          <i class="gate__track"><i class="gate__pip"></i></i>
-          <span class="gate__meta mono">LATEST RELEASE · WINDOWS &amp; macOS · OPEN SOURCE</span>
-          <i class="gate__arrow">↓</i>
-        </span>
-      </a>
-
-      <nav class="cta__index">
-        <a class="ix" data-cursor="hover" href="https://github.com/LifeArchiveProject/WeChatDataAnalysis/releases/latest" target="_blank" rel="noopener">
-          <span class="ix__top"><span class="ix__n mono">01</span><i class="ix__rule"></i><i class="ix__arw">↗</i></span>
-          <b class="ix__name">Releases</b>
-          <span class="ix__desc">下载最新版本安装包</span>
-        </a>
-        <a class="ix" data-cursor="hover" href="https://github.com/LifeArchiveProject/WeChatDataAnalysis" target="_blank" rel="noopener">
-          <span class="ix__top"><span class="ix__n mono">02</span><i class="ix__rule"></i><i class="ix__arw">↗</i></span>
-          <b class="ix__name">GitHub</b>
-          <span class="ix__desc">逐行阅读全部源码</span>
-        </a>
-        <a class="ix" data-cursor="hover" href="https://qm.qq.com/q/VQEQ7PcGkk" target="_blank" rel="noopener">
-          <span class="ix__top"><span class="ix__n mono">03</span><i class="ix__rule"></i><i class="ix__arw">↗</i></span>
-          <b class="ix__name">QQ 交流群</b>
-          <span class="ix__desc">聊聊使用与反馈</span>
-        </a>
-        <a class="ix" data-cursor="hover" href="https://github.com/LifeArchiveProject/WeChatDataAnalysis#致谢" target="_blank" rel="noopener">
-          <span class="ix__top"><span class="ix__n mono">04</span><i class="ix__rule"></i><i class="ix__arw">↗</i></span>
-          <b class="ix__name">致谢名单</b>
-          <span class="ix__desc">感谢每一位贡献者</span>
-        </a>
-      </nav>
-
-      <footer class="cta__colophon">
-        <i class="cta__colophon-rule" aria-hidden="true"></i>
-        <div class="cta__colophon-row mono">
-          <span class="cc-a"><i></i>© 2026 LifeArchiveProject</span>
-          <span>仅限个人合法使用 · 数据请谨慎保管</span>
-          <span>Made with GSAP · Three.js · Lenis</span>
-        </div>
-      </footer>
-    </section>
-
-  </main>
-
-  <!-- vendor (UMD) -->
-  <script src="vendor/gsap.min.js"></script>
-  <script src="vendor/ScrollTrigger.min.js"></script>
-  <script src="vendor/ScrollToPlugin.min.js"></script>
-  <script src="vendor/SplitText.min.js"></script>
-  <script src="vendor/ScrambleTextPlugin.min.js"></script>
-  <script src="vendor/CustomEase.min.js"></script>
-  <script src="vendor/DrawSVGPlugin.min.js"></script>
-  <script src="vendor/lenis.min.js"></script>
-
-  <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
-  <script type="module" src="assets/js/main.js"></script>
 </body>
 </html>

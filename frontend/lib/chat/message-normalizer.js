@@ -46,7 +46,12 @@ const isUsableMediaUrl = (value) => {
 }
 
 const buildAccountMediaUrl = (apiBase, path, parts) => {
-  return `${apiBase}${path}?${parts.filter(Boolean).join('&')}`
+  const query = parts.filter(Boolean)
+  // 让升级后的默认图片请求避开旧版本仍在有效期内的缩略图浏览器缓存。
+  if (path === '/chat/media/image' && !query.some((part) => part.startsWith('v='))) {
+    query.push('v=local-quality-1')
+  }
+  return `${apiBase}${path}?${query.join('&')}`
 }
 
 const isManualLargeImageUrl = (value) => {
@@ -288,6 +293,7 @@ export const createMessageNormalizer = ({
       sender,
       senderUsername: rawSenderUsername,
       senderDisplayName,
+      senderEnterpriseName: String(msg.senderEnterpriseName || '').trim(),
       content: msg.content || '',
       time: formatMessageTime(msg.createTime),
       fullTime: formatMessageFullTime(msg.createTime),

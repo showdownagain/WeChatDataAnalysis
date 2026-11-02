@@ -1,6 +1,25 @@
 export const WECHAT_INSTALL_PATH_STORAGE_KEY = 'decrypt.wechatInstallPath'
 
-export const normalizeWechatInstallPath = (value) => String(value || '').trim()
+export const isLikelyWechatDataPath = (value) => {
+  const segments = String(value || '')
+    .trim()
+    .split(/[\\/]+/)
+    .map(segment => segment.toLowerCase())
+    .filter(Boolean)
+
+  return segments.some(segment => (
+    segment === 'xwechat_files' ||
+    segment === 'wechat files' ||
+    segment === 'weixin files' ||
+    segment === 'db_storage' ||
+    segment.startsWith('wxid_')
+  ))
+}
+
+export const normalizeWechatInstallPath = (value) => {
+  const normalized = String(value || '').trim()
+  return isLikelyWechatDataPath(normalized) ? '' : normalized
+}
 
 export const readStoredWechatInstallPath = () => {
   if (!process.client || typeof window === 'undefined') return ''

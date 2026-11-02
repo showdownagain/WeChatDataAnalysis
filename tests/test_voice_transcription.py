@@ -8,7 +8,7 @@ import time
 import unittest
 import weakref
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -787,6 +787,19 @@ class TestVoiceTranscription(unittest.TestCase):
                 )
         self.assertEqual(result["model"], "faster-whisper-small")
 
+    def test_public_model_name_handles_imported_paths_on_posix(self):
+        # Windows 上也模拟 POSIX 路径语义，避免仅在 macOS CI 才发现泄露。
+        cases = [
+            (r"D:\models\faster-whisper-small", "faster-whisper-small"),
+            ("/models/faster-whisper-small/", "faster-whisper-small"),
+            (r"\\server\models\faster-whisper-small", "faster-whisper-small"),
+            ("qwen3-asr-06b-hf", "qwen3-asr-06b-hf"),
+        ]
+        with patch.object(voice_transcription_module, "Path", PurePosixPath):
+            for value, expected in cases:
+                with self.subTest(value=value):
+                    self.assertEqual(voice_transcription_module._public_model_name(value), expected)
+
     def test_cuda_initialization_failure_falls_back_to_cpu(self):
         with tempfile.TemporaryDirectory() as tmp:
             calls = []
@@ -799,7 +812,7 @@ class TestVoiceTranscription(unittest.TestCase):
                 return fake_model
 
             service = VoiceTranscriptionService(
-                VoiceTranscriptionConfig(device="cuda", compute_type="float16"),
+                VoiceTranscriptionConfig(model="turbo", device="cuda", compute_type="float16"),
                 model_loader=model_loader,
             )
             cuda_report = {"available": True, "deviceCount": 1, "devices": [], "reason": ""}
@@ -842,7 +855,7 @@ class TestVoiceTranscription(unittest.TestCase):
             return cuda_model if config.device == "cuda" else cpu_model
 
         service = VoiceTranscriptionService(
-            VoiceTranscriptionConfig(device="cuda", compute_type="float16"),
+            VoiceTranscriptionConfig(model="turbo", device="cuda", compute_type="float16"),
             model_loader=model_loader,
         )
         cuda_report = {"available": True, "deviceCount": 1, "devices": [], "reason": ""}
@@ -1194,7 +1207,7 @@ class TestVoiceTranscription(unittest.TestCase):
             return InvalidAudioModel()
 
         service = VoiceTranscriptionService(
-            VoiceTranscriptionConfig(device="cuda", compute_type="float16"),
+            VoiceTranscriptionConfig(model="turbo", device="cuda", compute_type="float16"),
             model_loader=model_loader,
         )
         cuda_report = {"available": True, "deviceCount": 1, "devices": [], "reason": ""}
@@ -1320,7 +1333,7 @@ class TestVoiceTranscription(unittest.TestCase):
                 return fake_model
 
             service = VoiceTranscriptionService(
-                VoiceTranscriptionConfig(),
+                VoiceTranscriptionConfig(model="turbo"),
                 model_loader=model_loader,
             )
             with patch(

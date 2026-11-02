@@ -5,6 +5,7 @@ import logging
 import os
 import sqlite3
 import sys
+import time
 import unittest
 import struct
 import zlib
@@ -22,7 +23,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 class TestChatMediaImageCacheUpgrade(unittest.TestCase):
     def assert_cacheable_chat_image_response(self, resp) -> None:
-        self.assertEqual(resp.headers.get("cache-control"), "private, max-age=86400")
+        self.assertEqual(resp.headers.get("cache-control"), "private, max-age=0, must-revalidate")
         self.assertTrue(str(resp.headers.get("etag") or "").strip())
 
     def _seed_contact_db(self, path: Path, *, account: str, username: str) -> None:
@@ -156,8 +157,9 @@ class TestChatMediaImageCacheUpgrade(unittest.TestCase):
             self._seed_session_db(account_dir / "session.db", username=username)
             self._seed_source_info(account_dir, wxid_dir=wxid_dir)
 
-            cached_thumb = b"\xff\xd8\xff\xd9"
-            live_original = b"\xff\xd8\xff\xe0" + (b"\x00" * 48) + b"\xff\xd9"
+            # 使用真正有效的缩略图，避免被损坏缓存分支提前删除而掩盖问题。
+            cached_thumb = self._png_payload(120, 120)
+            live_original = self._png_payload(800, 600)
             cache_path = self._seed_cached_resource(account_dir, md5=md5, payload=cached_thumb)
             self._seed_live_variant(wxid_dir, username=username, md5=md5, suffix="_h", payload=live_original)
 
@@ -173,7 +175,7 @@ class TestChatMediaImageCacheUpgrade(unittest.TestCase):
                 self.assertEqual(resp.status_code, 200)
                 self.assertEqual(resp.content, live_original)
                 self.assert_cacheable_chat_image_response(resp)
-                self.assertEqual(cache_path.read_bytes(), live_original)
+                self.assertEqual(cache_path.with_suffix(".png").read_bytes(), live_original)
             finally:
                 try:
                     client.close()
@@ -315,7 +317,7 @@ class TestChatMediaImageCacheUpgrade(unittest.TestCase):
                 self.assertEqual(second.status_code, 304)
                 self.assertEqual(second.content, b"")
                 self.assertEqual(second.headers.get("etag"), etag)
-                self.assertEqual(second.headers.get("cache-control"), "private, max-age=86400")
+                self.assertEqual(second.headers.get("cache-control"), "private, max-age=0, must-revalidate")
             finally:
                 try:
                     client.close()
@@ -370,13 +372,8 @@ class TestChatMediaImageCacheUpgrade(unittest.TestCase):
                     resp = client.get(
                         "/api/chat/media/image",
                         params={
-                            "account": account,
-                            "md5": md5,
-                            "server_id": server_id,
-                            "username": username,
-                            "prefer_live": "true",
-                            "deep_scan": "true",
-                            "fetch_remote": "true",
+                            "account": account, "md5": md5, "server_id": server_id,
+                            "username": username, "fetch_remote": "true",
                         },
                     )
 
@@ -401,6 +398,104 @@ class TestChatMediaImageCacheUpgrade(unittest.TestCase):
                     os.environ.pop("WECHAT_TOOL_DATA_DIR", None)
                 else:
                     os.environ["WECHAT_TOOL_DATA_DIR"] = prev_data
+
+    def _run_cdn_error_case(self, error, *, expected_status: int):
+        """走「显式加载大图 → 本地只有缩略图 → CDN」链路，让下载器抛出给定错误。"""
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            account = "wxid_test"
+            username = "wxid_friend"
+            md5 = "dddddddddddddddddddddddddddddddd"
+            server_id = 70002
+
+            account_dir = root / "output" / "databases" / account
+            wxid_dir = root / "wxid_source"
+            account_dir.mkdir(parents=True, exist_ok=True)
+            wxid_dir.mkdir(parents=True, exist_ok=True)
+            self._seed_contact_db(account_dir / "contact.db", account=account, username=username)
+            self._seed_session_db(account_dir / "session.db", username=username)
+            self._seed_source_info(account_dir, wxid_dir=wxid_dir)
+            self._seed_cached_resource(account_dir, md5=md5, payload=self._png_payload(8, 8))
+
+            prev_data = os.environ.get("WECHAT_TOOL_DATA_DIR")
+            client = None
+            try:
+                os.environ["WECHAT_TOOL_DATA_DIR"] = str(root)
+                client = self._build_client()
+                import wechat_decrypt_tool.routers.chat_media as chat_media
+
+                downloader = AsyncMock(side_effect=error)
+                with (
+                    patch.object(chat_media.cdn_image_service, "is_cdn_download_enabled", return_value=False),
+                    patch.object(
+                        chat_media,
+                        "_lookup_image_cdn_download_info",
+                        return_value={"fileid": "cdn-original-file", "aeskey": "ab" * 16},
+                    ),
+                    patch.object(chat_media.cdn_image_service, "download_original_image", downloader),
+                ):
+                    resp = client.get(
+                        "/api/chat/media/image",
+                        params={
+                            "account": account,
+                            "md5": md5,
+                            "server_id": server_id,
+                            "username": username,
+                            "prefer_live": "true",
+                            "deep_scan": "true",
+                            "fetch_remote": "true",
+                        },
+                    )
+                self.assertEqual(resp.status_code, expected_status)
+                downloader.assert_awaited_once()
+                return resp
+            finally:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                logging.shutdown()
+                if prev_data is None:
+                    os.environ.pop("WECHAT_TOOL_DATA_DIR", None)
+                else:
+                    os.environ["WECHAT_TOOL_DATA_DIR"] = prev_data
+
+    def test_cdn_quota_exceeded_maps_to_429_with_retry_after_from_resets_at(self):
+        from wechat_decrypt_tool import cdn_image_service
+
+        quota = {"period": "day", "limitBytes": 100, "usedBytes": 100, "remainingBytes": 0, "resetsAt": int(time.time()) + 100}
+        resp = self._run_cdn_error_case(
+            cdn_image_service.CdnQuotaExceededError("额度不足", quota=quota),
+            expected_status=429,
+        )
+        detail = resp.json()["detail"]
+        self.assertEqual(detail["code"], "quota_exceeded")
+        self.assertEqual(detail["message"], "额度不足")
+        self.assertEqual(detail["quota"], quota)
+        retry_after = int(resp.headers["Retry-After"])
+        self.assertTrue(90 <= retry_after <= 100, retry_after)
+
+    def test_cdn_rate_limited_maps_to_429_with_retry_after(self):
+        from wechat_decrypt_tool import cdn_image_service
+
+        resp = self._run_cdn_error_case(
+            cdn_image_service.CdnRateLimitedError("slow down", retry_after=7),
+            expected_status=429,
+        )
+        self.assertEqual(resp.headers["Retry-After"], "7")
+        self.assertEqual(resp.json()["detail"], {"code": "rate_limited", "message": "slow down", "retryAfterSeconds": 7})
+
+    def test_cdn_account_frozen_maps_to_403(self):
+        from wechat_decrypt_tool import cdn_image_service
+
+        resp = self._run_cdn_error_case(cdn_image_service.CdnAccountFrozenError("账号已被冻结"), expected_status=403)
+        self.assertEqual(resp.json()["detail"], {"code": "account_frozen", "message": "账号已被冻结"})
+        self.assertNotIn("Retry-After", resp.headers)
+
+    def test_cdn_generic_error_falls_back_to_404(self):
+        from wechat_decrypt_tool import cdn_image_service
+
+        self._run_cdn_error_case(cdn_image_service.CdnError("boom", code="network_error"), expected_status=404)
 
     def test_explicit_large_image_request_keeps_local_high_variant_before_cdn(self):
         with TemporaryDirectory() as td:

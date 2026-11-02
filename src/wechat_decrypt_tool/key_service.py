@@ -166,6 +166,19 @@ def _normalize_user_path(value: Any) -> str:
         return raw
 
 
+def _is_likely_wechat_data_path(value: Any) -> bool:
+    normalized = _normalize_user_path(value)
+    if not normalized:
+        return False
+
+    segments = [segment.lower() for segment in re.split(r"[\\\\/]+", normalized) if segment]
+    return any(
+        segment in {"xwechat_files", "wechat files", "weixin files", "db_storage"}
+        or segment.startswith("wxid_")
+        for segment in segments
+    )
+
+
 def _read_wechat_version_from_exe(exe_path: str) -> str:
     normalized = _normalize_user_path(exe_path)
     if not normalized:
@@ -234,6 +247,12 @@ def _resolve_wechat_dll_path(wechat_install_path: Optional[str] = None) -> Path:
         return out
 
     normalized = _normalize_user_path(wechat_install_path)
+    if _is_likely_wechat_data_path(normalized):
+        logger.warning(
+            "[db_key_v4] 忽略误填的微信数据目录，改为自动定位运行中的微信 DLL: input=%s",
+            normalized,
+        )
+        normalized = ""
     if normalized:
         candidate = Path(normalized).expanduser()
         if candidate.is_file():
@@ -283,7 +302,7 @@ def _normalize_db_key(value: Any) -> str:
 
 
 def _normalize_internal_db_key(value: Any) -> bytes:
-    """把 scan.py 里扫出来的 32 字节 DLL key 规范化成 bytes。"""
+    """把 DLL 扫描（dll_key_scan）得到的 32 字节 DLL key 规范化成 bytes。"""
     if value is None:
         return b""
 
@@ -327,7 +346,7 @@ def _normalize_internal_db_key(value: Any) -> bytes:
 
 
 def _load_internal_db_key_candidates(wechat_install_path: Optional[str] = None) -> list[bytes]:
-    """自动扫描 Weixin.dll，提取 scan.py 需要的 internal_db_key 候选。"""
+    """自动扫描 Weixin.dll，提取 V4 密钥恢复需要的 internal_db_key 候选。"""
     dll_path = _resolve_wechat_dll_path(wechat_install_path)
     logger.info("[db_key_v4] 准备扫描 DLL key: dll_path=%s", str(dll_path))
 
@@ -608,6 +627,12 @@ class WeChatKeyFetcher:
             raise RuntimeError("wx_key 模块未安装或加载失败")
 
         manual_path = _normalize_user_path(wechat_install_path)
+        if _is_likely_wechat_data_path(manual_path):
+            logger.warning(
+                "[db_key] 忽略误填的微信数据目录，改为自动定位运行中的微信程序: input=%s",
+                manual_path,
+            )
+            manual_path = ""
         if manual_path:
             exe_path = _resolve_manual_wechat_exe_path(manual_path)
             version = _read_wechat_version_from_exe(exe_path)

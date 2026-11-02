@@ -1,8 +1,10 @@
+import asyncio
 import hashlib
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,6 +12,119 @@ sys.path.insert(0, str(ROOT / "src"))
 
 
 class TestChatMediaRecordVideo(unittest.TestCase):
+    def test_frontend_builds_scoped_record_video_url_without_md5(self):
+        source = (ROOT / "frontend" / "lib" / "chat" / "chat-history.js").read_text(encoding="utf-8")
+
+        self.assertIn("const hasRecordVideoLookup = Boolean(", source)
+        self.assertIn("candidateMd5 ? `md5=${encodeURIComponent(candidateMd5)}` : ''", source)
+        self.assertIn("output.videoMd5 || hasRecordVideoLookup", source)
+
+    def test_video_route_rejects_blank_md5_without_complete_record_scope(self):
+        from fastapi import HTTPException
+        from wechat_decrypt_tool.routers import chat_media
+
+        with self.assertRaises(HTTPException) as raised:
+            asyncio.run(
+                chat_media.get_chat_video(
+                    md5=None,
+                    file_id=None,
+                    record_index=2,
+                    record_index_path="2",
+                    record_attach="02ebe2dfb0e86941c672c76dfd97291f",
+                )
+            )
+
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_video_route_accepts_blank_md5_for_scoped_record_lookup(self):
+        from wechat_decrypt_tool.routers import chat_media
+
+        with TemporaryDirectory() as td:
+            account_dir = Path(td) / "account"
+            wxid_dir = Path(td) / "wxid_test"
+            record_attach = "02ebe2dfb0e86941c672c76dfd97291f"
+            video_path = wxid_dir / "msg" / "attach" / record_attach / "2026-08" / "Rec" / "record-0" / "V" / "2.mp4"
+            video_path.parent.mkdir(parents=True, exist_ok=True)
+            video_payload = b"\x00\x00\x00\x18ftypmp42" + (b"blank-md5-record-video" * 1024)
+            video_path.write_bytes(video_payload)
+
+            with (
+                mock.patch.object(chat_media, "_resolve_account_dir", return_value=account_dir),
+                mock.patch.object(chat_media, "_resolve_account_wxid_dir", return_value=wxid_dir),
+                mock.patch.object(chat_media, "_resolve_account_db_storage_dir", return_value=None),
+                mock.patch.object(chat_media, "_hardlink_has_table_prefix", return_value=False),
+            ):
+                response = asyncio.run(
+                    chat_media.get_chat_video(
+                        md5=None,
+                        file_id=None,
+                        account="account",
+                        username="",
+                        src_create_time=1786166927,
+                        file_size=len(video_payload),
+                        record_index=2,
+                        record_index_path="2",
+                        record_attach=record_attach,
+                    )
+                )
+
+            self.assertEqual(Path(response.path), video_path)
+
+    def test_fast_probe_record_video_rejects_ambiguous_loose_index_match(self):
+        from wechat_decrypt_tool.routers.chat_media import _fast_probe_record_video_in_chat_attach
+
+        with TemporaryDirectory() as td:
+            wxid_dir = Path(td) / "wxid_test"
+            record_attach = "02ebe2dfb0e86941c672c76dfd97291f"
+            rec_root = wxid_dir / "msg" / "attach" / record_attach / "2026-07" / "Rec"
+            for record_id, marker in (("record-a", b"a"), ("record-b", b"b")):
+                video_path = rec_root / record_id / "V" / "2.mp4"
+                video_path.parent.mkdir(parents=True, exist_ok=True)
+                video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42" + (marker * 2048))
+
+            found = _fast_probe_record_video_in_chat_attach(
+                wxid_dir_str=str(wxid_dir),
+                username="selected_contact",
+                md5="00000000000000000000000000000000",
+                want_thumb=False,
+                src_create_time=1783388820,
+                file_size=999999,
+                record_index=2,
+                record_index_path="2",
+                record_attach=record_attach,
+            )
+
+            self.assertIsNone(found)
+
+    def test_fast_probe_record_video_accepts_blank_md5_only_with_exact_size(self):
+        from wechat_decrypt_tool.routers.chat_media import _fast_probe_record_video_in_chat_attach
+
+        with TemporaryDirectory() as td:
+            wxid_dir = Path(td) / "wxid_test"
+            record_attach = "02ebe2dfb0e86941c672c76dfd97291f"
+            video_path = wxid_dir / "msg" / "attach" / record_attach / "2026-08" / "Rec" / "record-0" / "V" / "2.mp4"
+            video_path.parent.mkdir(parents=True, exist_ok=True)
+            video_payload = b"\x00\x00\x00\x18ftypmp42" + (b"blank-md5-record-video" * 1024)
+            video_path.write_bytes(video_payload)
+
+            common = {
+                "wxid_dir_str": str(wxid_dir),
+                "username": "selected_contact",
+                "md5": "",
+                "want_thumb": False,
+                "src_create_time": 1786166927,
+                "record_index": 2,
+                "record_index_path": "2",
+                "record_attach": record_attach,
+            }
+            self.assertEqual(
+                _fast_probe_record_video_in_chat_attach(file_size=len(video_payload), **common),
+                str(video_path),
+            )
+            self.assertIsNone(
+                _fast_probe_record_video_in_chat_attach(file_size=len(video_payload) + 1, **common)
+            )
+
     def test_fast_probe_finds_chat_history_record_video_under_attach_rec(self):
         from wechat_decrypt_tool.routers.chat_media import _fast_probe_video_path_by_md5
 

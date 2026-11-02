@@ -26,7 +26,6 @@ const workDir = path.join(repoRoot, "desktop", "build", "pyinstaller");
 const specDir = path.join(repoRoot, "desktop", "build", "pyinstaller-spec");
 const nativeDir = path.join(repoRoot, "src", "wechat_decrypt_tool", "native");
 const runtimeNativeDir = path.join(repoRoot, "desktop", "build", "native-runtime");
-const skillDir = path.join(repoRoot, "skills", "wechat-mcp-copilot");
 const macosXkeyContractPath = path.join(
   repoRoot,
   "src",
@@ -97,6 +96,13 @@ function nativeCoreManifestErrors(manifest) {
   }
   if (manifest.schemaVersion === 2 && Object.prototype.hasOwnProperty.call(manifest, "platform")) {
     errors.push("schemaVersion 2 must not declare platform");
+  }
+  if (manifest.schemaVersion === 2 && manifest.readOnlyBuild !== true) {
+    errors.push("readOnlyBuild must equal true");
+  }
+  if (manifest.schemaVersion === 2 &&
+      (!Array.isArray(manifest.wechatActions) || manifest.wechatActions.length !== 0)) {
+    errors.push("wechatActions must be an empty array");
   }
   if (manifest.schemaVersion === 2) {
     errors.push(...windowsNativeAsrManifestErrors(manifest));
@@ -386,6 +392,17 @@ function buildIntegrityNativeBinary({ env = process.env, platform = process.plat
 }
 
 function validateRuntimeNativeHelpers(destinationDir, platform = process.platform) {
+  for (const name of [
+    "weflow_wasm_keystream.js",
+    "wasm_video_decode.js",
+    "wasm_video_decode.wasm",
+    "sns_image_fixture.json",
+  ]) {
+    const resource = path.join(destinationDir, "weflow_wasm", name);
+    if (!fs.existsSync(resource) || !fs.statSync(resource).isFile()) {
+      throw new Error(`Missing SNS WASM runtime resource: ${resource}`);
+    }
+  }
   if (platform !== "darwin") return;
   const imageScanHelper = path.join(destinationDir, "macos", "universal", "image_scan_helper");
   if (!fs.existsSync(imageScanHelper)) {
@@ -621,8 +638,6 @@ function main() {
     "--add-data",
     pyInstallerAddData(runtimeNativeDir, "wechat_decrypt_tool/native"),
     "--add-data",
-    pyInstallerAddData(skillDir, "skills/wechat-mcp-copilot"),
-    "--add-data",
     pyInstallerAddData(macosXkeyContractPath, "wechat_decrypt_tool/resources"),
     "--collect-all",
     "faster_whisper",
@@ -633,9 +648,28 @@ function main() {
     "--collect-all",
     "opencc",
     "--collect-all",
+    "sherpa_onnx",
+    "--add-data",
+    pyInstallerAddData(path.join(repoRoot, "src/wechat_decrypt_tool/resources/voice_models.json"), "wechat_decrypt_tool/resources"),
+    "--add-data",
+    pyInstallerAddData(path.join(repoRoot, "src/wechat_decrypt_tool/resources/qwen_gpu_runtime.json"), "wechat_decrypt_tool/resources"),
+    "--collect-all",
     "watchfiles",
     entry,
   ];
+
+  // CUDA/PyTorch 体积较大，仅在明确构建 Qwen GPU 版本时收集。
+  if (process.argv.includes("--qwen-gpu")) {
+    args.splice(args.length - 1, 0, "--collect-all", "torch", "--collect-all", "transformers");
+  } else {
+    args.splice(args.length - 1, 0, "--exclude-module", "torch", "--exclude-module", "transformers");
+  }
+  // 下载后的推理库会动态导入标准库，冻结分析无法从排除的 Torch 源码推导这些依赖。
+  if (process.platform === "win32") {
+    const stdlib = spawnSync("uv", ["run", "--no-sync", "python", path.join(repoRoot, "tools/qwen_runtime_stdlib.py")], { cwd: repoRoot, encoding: "utf8", windowsHide: true });
+    if (stdlib.status !== 0) throw new Error(`Qwen runtime standard library discovery failed: ${stdlib.stderr}`);
+    for (const moduleName of JSON.parse(stdlib.stdout)) args.splice(args.length - 1, 0, "--hidden-import", moduleName);
+  }
 
   if (process.platform === "win32") {
     args.splice(

@@ -3,28 +3,48 @@ from __future__ import annotations
 import json
 import os
 import re
-import secrets
 import sys
 from pathlib import Path
 
 
 RUNTIME_SETTINGS_FILENAME = "runtime_settings.json"
 BACKEND_PORT_KEY = "backend_port"
-BACKEND_HOST_KEY = "backend_host"
-MCP_TOKEN_KEY = "mcp_token"
 VOICE_TRANSCRIPTION_DEVICE_KEY = "voice_transcription_device"
 VOICE_TRANSCRIPTION_MODEL_KEY = "voice_transcription_model"
+VOICE_MODEL_DOWNLOAD_SOURCE_KEY = "voice_model_download_source"
+VOICE_MODEL_DOWNLOAD_ENDPOINTS = {
+    "huggingface": "https://huggingface.co",
+    "hf-mirror": "https://hf-mirror.com",
+}
 ENV_PORT_KEY = "WECHAT_TOOL_PORT"
 ENV_HOST_KEY = "WECHAT_TOOL_HOST"
-ENV_MCP_TOKEN_KEY = "WECHAT_TOOL_MCP_TOKEN"
+ENV_ALLOW_REMOTE_CALLS_KEY = "WECHAT_TOOL_ALLOW_REMOTE_CALLS"
 ENV_VOICE_TRANSCRIPTION_DEVICE_KEY = "WECHAT_TOOL_WHISPER_DEVICE"
 ENV_VOICE_TRANSCRIPTION_MODEL_KEY = "WECHAT_TOOL_WHISPER_MODEL"
 ENV_FILE_KEY = "WECHAT_TOOL_ENV_FILE"
 DEFAULT_ENV_FILENAME = ".env"
 LOOPBACK_BACKEND_HOST = "127.0.0.1"
-LAN_BACKEND_HOST = "0.0.0.0"
 VOICE_TRANSCRIPTION_DEVICE_CPU = "cpu"
 VOICE_TRANSCRIPTION_DEVICE_CUDA = "cuda"
+
+
+def remote_calls_enabled(default: bool = False) -> bool:
+    """Return whether caller-location checks are explicitly relaxed.
+
+    This is deliberately opt-in. It does not disable native leases/build
+    expiry, feature bits, path validation, or resource limits.
+    """
+
+    raw = str(os.environ.get(ENV_ALLOW_REMOTE_CALLS_KEY, "") or "").strip().lower()
+    if not raw:
+        return bool(default)
+    return raw in {"1", "true", "yes", "on"}
+
+
+def default_backend_host() -> str:
+    """Choose the bind default without overriding explicit host settings."""
+
+    return LOOPBACK_BACKEND_HOST
 
 
 def _parse_port(value: object) -> int | None:
@@ -52,21 +72,9 @@ def _normalize_host(value: object) -> str | None:
         return None
     if raw in {LOOPBACK_BACKEND_HOST, "localhost", "::1"}:
         return LOOPBACK_BACKEND_HOST
-    if raw in {LAN_BACKEND_HOST, "::"}:
-        return LAN_BACKEND_HOST
+    if raw in {"0.0.0.0", "::"}:
+        return "0.0.0.0"
     return None
-
-
-def _normalize_mcp_token(value: object) -> str | None:
-    try:
-        raw = str(value or "").strip()
-    except Exception:
-        return None
-    if len(raw) < 16 or len(raw) > 512:
-        return None
-    if any(ch.isspace() for ch in raw):
-        return None
-    return raw
 
 
 def _normalize_voice_transcription_device(value: object) -> str | None:
@@ -87,10 +95,6 @@ def _normalize_voice_transcription_model(value: object) -> str | None:
     if not raw or len(raw) > 512 or any(ord(ch) < 32 for ch in raw):
         return None
     return raw
-
-
-def generate_mcp_token() -> str:
-    return secrets.token_urlsafe(32)
 
 
 def _read_runtime_settings() -> dict:
@@ -169,74 +173,14 @@ def read_effective_backend_port(default: int) -> tuple[int, str]:
     return int(default), "default"
 
 
-def read_backend_host_setting() -> str | None:
-    try:
-        data = _read_runtime_settings()
-        return _normalize_host(data.get(BACKEND_HOST_KEY))
-    except Exception:
-        return None
-
-
-def write_backend_host_setting(host: str | None) -> None:
-    safe_host = _normalize_host(host)
-    try:
-        data = _read_runtime_settings()
-        if safe_host is None:
-            data.pop(BACKEND_HOST_KEY, None)
-        else:
-            data[BACKEND_HOST_KEY] = safe_host
-        _write_runtime_settings(data)
-    except Exception:
-        return
-
-
 def read_effective_backend_host(default: str = LOOPBACK_BACKEND_HOST) -> tuple[str, str]:
-    """Return (host, source) where source is one of: env | settings | default."""
+    """Return the explicit environment bind address or the loopback default."""
 
     env_host = _normalize_host(os.environ.get(ENV_HOST_KEY, ""))
     if env_host is not None:
         return env_host, "env"
 
-    settings_host = read_backend_host_setting()
-    if settings_host is not None:
-        return settings_host, "settings"
-
     return _normalize_host(default) or LOOPBACK_BACKEND_HOST, "default"
-
-
-def read_mcp_token_setting() -> str | None:
-    try:
-        data = _read_runtime_settings()
-        return _normalize_mcp_token(data.get(MCP_TOKEN_KEY))
-    except Exception:
-        return None
-
-
-def write_mcp_token_setting(token: str | None) -> None:
-    safe_token = _normalize_mcp_token(token)
-    try:
-        data = _read_runtime_settings()
-        if safe_token is None:
-            data.pop(MCP_TOKEN_KEY, None)
-        else:
-            data[MCP_TOKEN_KEY] = safe_token
-        _write_runtime_settings(data)
-    except Exception:
-        return
-
-
-def read_effective_mcp_token() -> tuple[str | None, str]:
-    """Return (token, source) where source is one of: env | settings | missing."""
-
-    env_token = _normalize_mcp_token(os.environ.get(ENV_MCP_TOKEN_KEY, ""))
-    if env_token is not None:
-        return env_token, "env"
-
-    settings_token = read_mcp_token_setting()
-    if settings_token is not None:
-        return settings_token, "settings"
-
-    return None, "missing"
 
 
 def read_voice_transcription_device_setting() -> str | None:
@@ -295,7 +239,7 @@ def write_voice_transcription_model_setting(model: str | None) -> None:
         return
 
 
-def read_effective_voice_transcription_model(default: str = "medium") -> tuple[str, str]:
+def read_effective_voice_transcription_model(default: str = "zipformer-small-ctc-int8") -> tuple[str, str]:
     """Return the Whisper model preference and its source: env | settings | default."""
 
     env_model = _normalize_voice_transcription_model(os.environ.get(ENV_VOICE_TRANSCRIPTION_MODEL_KEY, ""))
@@ -306,23 +250,24 @@ def read_effective_voice_transcription_model(default: str = "medium") -> tuple[s
     if settings_model is not None:
         return settings_model, "settings"
 
-    return _normalize_voice_transcription_model(default) or "medium", "default"
+    return _normalize_voice_transcription_model(default) or "zipformer-small-ctc-int8", "default"
 
 
-def ensure_mcp_token() -> tuple[str, str]:
-    token, source = read_effective_mcp_token()
-    if token:
-        return token, source
-
-    token = generate_mcp_token()
-    write_mcp_token_setting(token)
-    return token, "generated"
+def read_voice_model_download_source() -> str:
+    """读取语音模型下载源；旧配置或无效配置使用官方源。"""
+    source = _read_runtime_settings().get(VOICE_MODEL_DOWNLOAD_SOURCE_KEY)
+    return source if isinstance(source, str) and source in VOICE_MODEL_DOWNLOAD_ENDPOINTS else "huggingface"
 
 
-def reset_mcp_token() -> str:
-    token = generate_mcp_token()
-    write_mcp_token_setting(token)
-    return token
+def write_voice_model_download_source(source: str) -> None:
+    """仅持久化预设下载源，不接受任意网址。"""
+    if source not in VOICE_MODEL_DOWNLOAD_ENDPOINTS:
+        raise ValueError("不支持的语音模型下载源")
+    data = _read_runtime_settings()
+    data[VOICE_MODEL_DOWNLOAD_SOURCE_KEY] = source
+    _write_runtime_settings(data)
+    if read_voice_model_download_source() != source:
+        raise OSError("语音模型下载源保存失败")
 
 
 def get_env_file_path() -> Path | None:
@@ -402,28 +347,4 @@ def write_backend_port_env_file(port: int | None) -> Path | None:
 
     safe_port = _parse_port(port)
     ok = _set_env_var_in_file(env_file, ENV_PORT_KEY, str(safe_port) if safe_port is not None else None)
-    return env_file if ok else None
-
-
-def write_backend_host_env_file(host: str | None) -> Path | None:
-    """Write `WECHAT_TOOL_HOST` into a `.env` file so `uv run main.py` picks it up on restart."""
-
-    env_file = get_env_file_path()
-    if not env_file:
-        return None
-
-    safe_host = _normalize_host(host)
-    ok = _set_env_var_in_file(env_file, ENV_HOST_KEY, safe_host)
-    return env_file if ok else None
-
-
-def write_mcp_token_env_file(token: str | None) -> Path | None:
-    """Write `WECHAT_TOOL_MCP_TOKEN` into a `.env` file so `uv run main.py` picks it up."""
-
-    env_file = get_env_file_path()
-    if not env_file:
-        return None
-
-    safe_token = _normalize_mcp_token(token)
-    ok = _set_env_var_in_file(env_file, ENV_MCP_TOKEN_KEY, safe_token)
     return env_file if ok else None

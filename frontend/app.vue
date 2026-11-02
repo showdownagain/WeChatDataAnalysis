@@ -16,6 +16,16 @@
       @close="closeSettingsDialog"
     />
 
+    <AdvancedFeaturesDialog
+      :open="advancedFeaturesDialogOpen"
+      @close="closeAdvancedFeaturesDialog"
+      @open-plans="openPlanWindow('manual')"
+    />
+
+    <ClientOnly v-if="route.path !== '/agreement'">
+      <PlanWindow />
+    </ClientOnly>
+
     <GuideDialog
       :open="noAccountGuideOpen"
       eyebrow="数据准备提示"
@@ -81,6 +91,11 @@ const {
   focusTarget: settingsDialogFocusTarget,
   closeDialog: closeSettingsDialog,
 } = useSettingsDialog()
+const {
+  open: advancedFeaturesDialogOpen,
+  closeDialog: closeAdvancedFeaturesDialog,
+} = useAdvancedFeaturesDialog()
+const { openPlanWindow } = usePlanWindow()
 const themeStore = useThemeStore()
 const privacyStore = usePrivacyStore()
 const chatAccounts = useChatAccountsStore()

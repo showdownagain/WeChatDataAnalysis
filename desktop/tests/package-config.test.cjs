@@ -21,6 +21,28 @@ test("desktop package excludes the retired Koffi and WCDB sidecar runtime", () =
   assert.ok(packageJson.build.files.includes("!src/wcdb-sidecar.cjs"));
 });
 
+test("desktop package keeps Electron run-as-node enabled for the SNS WASM helper", () => {
+  assert.equal(packageJson.build.electronFuses?.runAsNode, true);
+  assert.equal(packageJson.build.electronFuses?.resetAdHocDarwinSignature, true);
+});
+
+test("SNS media CI covers Windows x64 and macOS arm64 without release secrets", () => {
+  const workflow = fs.readFileSync(
+    path.join(repoRoot, ".github", "workflows", "sns-media-cross-platform.yml"),
+    "utf8",
+  );
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /os:\s*windows-2022/);
+  assert.match(workflow, /arch:\s*x64/);
+  assert.match(workflow, /os:\s*macos-14/);
+  assert.match(workflow, /arch:\s*arm64/);
+  assert.match(workflow, /tests\/sns-wasm-runtime\.test\.cjs/);
+  assert.match(workflow, /tests\/sns-media-source\.test\.mjs/);
+  assert.match(workflow, /tests\/test_sns_media\.py/);
+  assert.doesNotMatch(workflow, /secrets\.|environment:\s*windows-private-pki-production/);
+});
+
 test("development launcher owns the Electron process tree directly", () => {
   const source = fs.readFileSync(path.join(desktopRoot, "scripts", "dev.cjs"), "utf8");
   assert.match(source, /const electronCommand = require\("electron"\);/);
@@ -93,7 +115,7 @@ test("Windows package uses private-PKI signing while preserving producer signatu
   );
 });
 
-test("Windows release uses protected cloud private-PKI signing and installer smoke", () => {
+test("Windows source packaging retains its installer smoke entry", () => {
   const smokeScript = path.join(desktopRoot, "scripts", "smoke-windows-package.cjs");
   assert.equal(packageJson.scripts["smoke:win"], "node scripts/smoke-windows-package.cjs");
   assert.equal(
@@ -108,158 +130,11 @@ test("Windows release uses protected cloud private-PKI signing and installer smo
   assert.match(smokeSource, /wechatdb_broker\.exe/);
   assert.match(smokeSource, /\/api\/health/);
   assert.match(smokeSource, /smokeElectronApp/);
+  assert.match(smokeSource, /smokeElectronNodeWasm/);
+  assert.match(smokeSource, /smokePackagedBackendWasm/);
   assert.match(smokeSource, /AUTO_UPDATE_ENABLED:\s*"0"/);
 
-  const workflow = fs
-    .readFileSync(path.join(repoRoot, ".github", "workflows", "release.yml"), "utf8")
-    .replace(/\r\n/g, "\n");
-  const windowsJob = workflow.match(
-    /\n  build-windows:\n([\s\S]*?)(?=\n  [A-Za-z0-9_-]+:\n|$)/
-  )?.[1] || "";
-  assert.match(windowsJob, /runs-on:\s*windows-2022/);
-  assert.match(windowsJob, /environment:\s*windows-private-pki-production/);
-  assert.match(windowsJob, /fetch-depth:\s*0/);
-  assert.match(windowsJob, /persist-credentials:\s*false/);
-  assert.match(windowsJob, /\$tagCommit\s+-cne\s+\$head/);
-  assert.match(windowsJob, /git merge-base --is-ancestor \$tagRef origin\/main/);
-  assert.match(windowsJob, /WCE_WINDOWS_CLIENT_CERT_THUMBPRINT/);
-  assert.match(
-    windowsJob,
-    /WCE_WINDOWS_CLIENT_SIGNING_PFX_BASE64:\s*\$\{\{ secrets\.WCE_WINDOWS_CLIENT_SIGNING_PFX_BASE64 \}\}/
-  );
-  assert.match(
-    windowsJob,
-    /WCE_WINDOWS_CLIENT_SIGNING_PFX_PASSWORD:\s*\$\{\{ secrets\.WCE_WINDOWS_CLIENT_SIGNING_PFX_PASSWORD \}\}/
-  );
-  assert.match(
-    windowsJob,
-    /WCE_WINDOWS_PRIVATE_ROOT_CERT_BASE64:\s*\$\{\{ secrets\.WCE_WINDOWS_PRIVATE_ROOT_CERT_BASE64 \}\}/
-  );
-  assert.match(windowsJob, /Import-WindowsCloudSigningIdentity\.ps1/);
-  assert.match(windowsJob, /Remove-WindowsCloudSigningIdentity\.ps1/);
-  assert.match(windowsJob, /if:\s*always\(\)/);
-  assert.match(windowsJob, /steps\.cloud-signing\.outputs\.client-thumbprint/);
-  assert.match(windowsJob, /steps\.cloud-signing\.outputs\.root-certificate-path/);
-  assert.match(windowsJob, /WCE_WINDOWS_SIGNING_ASSURANCE/);
-  assert.match(windowsJob, /Install Python dependencies/);
-  assert.match(windowsJob, /Run focused Python release tests/);
-  assert.match(windowsJob, /uv sync --frozen/);
-  assert.match(windowsJob, /uv run pytest -q/);
-  assert.match(windowsJob, /tests\/test_native_core_broker_lifecycle\.py/);
-  assert.match(windowsJob, /tests\/test_native_core_device_credential\.py/);
-  assert.match(windowsJob, /tests\/test_wcdb_realtime_native_core_required\.py/);
-  assert.doesNotMatch(windowsJob, /Prepare signed ephemeral Python test host/);
-  assert.doesNotMatch(windowsJob, /WCE_PYTHON_TEST_HOST/);
-  assert.doesNotMatch(windowsJob, /WECHAT_TOOL_NATIVE_CORE_(?:LIBRARY|BROKER)/);
-  assert.match(windowsJob, /WCE_NATIVE_CORE_SOURCE_REVISION/);
-  assert.match(windowsJob, /WCE_NATIVE_CORE_BUILD_ID/);
-  assert.match(windowsJob, /WCE_NATIVE_CORE_ARTIFACT_SHA256/);
-  assert.match(windowsJob, /WCE_NATIVE_CORE_ARTIFACT_READ_TOKEN/);
-  assert.match(windowsJob, /gh release download \$releaseTag/);
-  assert.match(
-    windowsJob,
-    /wechatdb-native-windows-x64-production-\$env:NATIVE_BUILD_ID\.zip/
-  );
-  assert.match(windowsJob, /Get-FileHash -LiteralPath \$archivePath -Algorithm SHA256/);
-  assert.match(windowsJob, /Expand-Archive -LiteralPath \$archivePath/);
-  assert.match(windowsJob, /WCE_WINDOWS_PRIVATE_ROOT_CERT_PATH/);
-  assert.match(windowsJob, /WCE_WINDOWS_PRIVATE_ROOT_SHA256/);
-  assert.match(windowsJob, /WCE_RFC3161_TIMESTAMP_URL/);
-  assert.match(windowsJob, /windows-private-pki-sign\.cjs preflight/);
-  assert.match(windowsJob, /provenance\.json/);
-  assert.match(windowsJob, /SHA256SUMS\.txt/);
-  assert.match(windowsJob, /GitHub releases must not contain a recipient-bound distribution capsule/);
-  assert.match(windowsJob, /GitHub releases require the shared public native distribution mode/);
-  assert.match(windowsJob, /\$manifestFields -notcontains 'distributionMode'/);
-  assert.match(windowsJob, /\$provenance\.build\.distributionMode -cne 'public'/);
-  assert.match(windowsJob, /distributionMode = 'public'/);
-  assert.match(windowsJob, /offlineBootstrapFeatureBits -ne 3/);
-  assert.match(windowsJob, /nativeAsrAuthorization -cne 'database-read'/);
-  assert.match(windowsJob, /nativeAsrAuthorization = 'database-read'/);
-  assert.match(windowsJob, /offlineExportSealFormat -cne 'WES2'/);
-  assert.match(windowsJob, /WCE-AUTOMATED-ANALYSIS-NOTICE-V2/);
-  assert.match(windowsJob, /WCE-AI-CHECKPOINT-SET-V3/);
-  assert.match(windowsJob, /securityCheckpointCount -ne 7/);
-  assert.match(windowsJob, /securityCheckpointSetSha256 -cnotmatch/);
-  assert.match(
-    windowsJob,
-    /\$provenance\.build\.securityCheckpointSetSha256 -cne\s+\$manifest\.securityCheckpointSetSha256/
-  );
-  assert.match(windowsJob, /WCE_NATIVE_CORE_SECURITY_NOTICE_SHA256/);
-  assert.match(windowsJob, /WCE_NATIVE_CORE_SECURITY_CHECKPOINT_SET_SHA256/);
-  assert.match(windowsJob, /windowsPrivatePkiLeafRevocation = 'build-and-lease-only'/);
-  assert.doesNotMatch(
-    windowsJob,
-    /WCE_WINDOWS_CLIENT_CSC_LINK|WIN_CSC_KEY_PASSWORD|runs-on:\s*\[self-hosted|wce-production-signing|WCE_SIGNTOOL_PATH|[A-Z]:\\abc\\/i
-  );
-  assert.match(windowsJob, /Verify signed unpacked Windows runtime/);
-  assert.match(windowsJob, /WCE_WINDOWS_INSTALLER_SMOKE_ALLOWED:\s*"1"/);
-  assert.match(windowsJob, /run:\s*npm run smoke:win/);
-  assert.match(windowsJob, /Run focused desktop release tests/);
-  assert.match(windowsJob, /tests\/package-config\.test\.cjs/);
-  assert.match(windowsJob, /tests\/native-core-before-pack\.test\.cjs/);
-  assert.match(windowsJob, /tests\/native-core-packaging\.test\.cjs/);
-  assert.match(windowsJob, /tests\/windows-package-smoke\.test\.cjs/);
-  assert.match(windowsJob, /tests\/windows-private-pki-runtime\.test\.cjs/);
-  assert.match(windowsJob, /tests\/windows-private-pki-sign\.test\.cjs/);
-  assert.doesNotMatch(windowsJob, /tests\/\*\.test\.cjs/);
-  assert.match(windowsJob, /Generate Windows release checksums and provenance/);
-  assert.match(windowsJob, /Get-FileHash -Algorithm SHA256/);
-  assert.match(windowsJob, /\[System\.Text\.Encoding\]::ASCII/);
-  assert.match(windowsJob, /release-provenance\.json/);
-  assert.match(windowsJob, /WDA_REPOSITORY:\s*\$\{\{ github\.repository \}\}/);
-  assert.match(windowsJob, /WDA_REVISION:\s*\$\{\{ github\.sha \}\}/);
-  assert.match(windowsJob, /WDA_TAG:\s*\$\{\{ github\.ref_name \}\}/);
-  assert.match(windowsJob, /NATIVE_REPOSITORY:/);
-  assert.match(windowsJob, /NATIVE_RUN_ID:/);
-  assert.match(windowsJob, /NATIVE_REVISION:/);
-  assert.match(windowsJob, /NATIVE_BUILD_ID:/);
-  assert.match(windowsJob, /NATIVE_CLIENT_SIGNER_SHA256:/);
-  assert.match(windowsJob, /NATIVE_BROKER_SIGNER_SHA256:/);
-  assert.match(windowsJob, /WINDOWS_PRIVATE_ROOT_SHA256:/);
-  assert.match(windowsJob, /WORKFLOW_RUN_ID:\s*\$\{\{ github\.run_id \}\}/);
-  assert.match(windowsJob, /WORKFLOW_RUN_ATTEMPT:\s*\$\{\{ github\.run_attempt \}\}/);
 
-  const downloadIndex = windowsJob.indexOf("gh release download $releaseTag");
-  const archiveHashIndex = windowsJob.indexOf("Get-FileHash -LiteralPath $archivePath");
-  const expandIndex = windowsJob.indexOf("Expand-Archive -LiteralPath $archivePath");
-  const importIndex = windowsJob.indexOf("Import-WindowsCloudSigningIdentity.ps1");
-  const validateIndex = windowsJob.indexOf("Validate native production artifact");
-  const pythonDependenciesIndex = windowsJob.indexOf("Install Python dependencies");
-  const pythonTestsIndex = windowsJob.indexOf("Run focused Python release tests");
-  const buildIndex = windowsJob.indexOf("Build Windows installer");
-  const uploadIndex = windowsJob.indexOf("Upload Windows release files");
-  const cleanupIndex = windowsJob.indexOf("Remove-WindowsCloudSigningIdentity.ps1");
-  assert.ok(downloadIndex >= 0 && downloadIndex < archiveHashIndex);
-  assert.ok(archiveHashIndex < expandIndex && expandIndex < importIndex);
-  assert.ok(importIndex < validateIndex);
-  assert.ok(
-    validateIndex < pythonDependenciesIndex && pythonDependenciesIndex < pythonTestsIndex
-  );
-  assert.ok(pythonTestsIndex < buildIndex && buildIndex < uploadIndex);
-  assert.ok(uploadIndex < cleanupIndex);
-
-  const importScript = fs.readFileSync(
-    path.join(desktopRoot, "scripts", "Import-WindowsCloudSigningIdentity.ps1"),
-    "utf8"
-  );
-  const cleanupScript = fs.readFileSync(
-    path.join(desktopRoot, "scripts", "Remove-WindowsCloudSigningIdentity.ps1"),
-    "utf8"
-  );
-  assert.match(importScript, /Microsoft Software Key Storage Provider/);
-  assert.match(importScript, /AllowExport\|AllowPlaintextExport/);
-  assert.match(importScript, /Import-PfxCertificate/);
-  assert.match(importScript, /\[IO\.File\]::Delete\(\$pfxPath\)/);
-  assert.match(cleanupScript, /Remove-Item -LiteralPath \$certificatePath -DeleteKey -Force/);
-
-  const upload = windowsJob.match(/- name: Upload Windows release files\n([\s\S]*?)$/)?.[1] || "";
-  assert.match(upload, /desktop\/dist\/\*Setup\*\.exe/);
-  assert.match(upload, /desktop\/dist\/\*Setup\*\.exe\.blockmap/);
-  assert.match(upload, /desktop\/dist\/latest\.yml/);
-  assert.match(upload, /desktop\/dist\/SHA256SUMS\.txt/);
-  assert.match(upload, /desktop\/dist\/release-provenance\.json/);
-  assert.doesNotMatch(upload, /builder-debug\.yml/);
 });
 
 test("release workflow pins every remote action to an approved commit", () => {
@@ -268,14 +143,7 @@ test("release workflow pins every remote action to an approved commit", () => {
     .replace(/\r\n/g, "\n");
   const approved = new Map([
     ["actions/checkout", "11d5960a326750d5838078e36cf38b85af677262"],
-    ["actions/setup-node", "49933ea5288caeca8642d1e84afbd3f7d6820020"],
-    ["actions/setup-python", "a26af69be951a213d495a4c3e4e4022e16d87065"],
-    ["actions/cache", "0057852bfaa89a56745cba8c7296529d2fc39830"],
     ["actions/download-artifact", "d3f86a106a0bac45b974a628896c90dbdf5c8093"],
-    ["actions/upload-artifact", "ea165f8d65b6e75b540449e92b4886f43607fa02"],
-    ["dtolnay/rust-toolchain", "4cda84d5c5c54efe2404f9d843567869ab1699d4"],
-    ["softprops/action-gh-release", "3bb12739c298aeb8a4eeaf626c5b8d85266b0e65"],
-    ["H3CoF6/qq-notify-action", "50d180981e7c7b8552a3331b981e3f8cfcf40c44"],
   ]);
   const remoteUses = [...workflow.matchAll(/^\s*uses:\s*([^\s#]+)(?:\s+#.*)?$/gm)]
     .map((match) => match[1])
@@ -289,14 +157,7 @@ test("release workflow pins every remote action to an approved commit", () => {
     assert.match(revision, /^[0-9a-f]{40}$/, `${use} is not pinned to a commit`);
     assert.equal(revision, approved.get(action), `${action} uses an unapproved commit`);
   }
-  for (const action of [
-    "actions/checkout",
-    "actions/setup-node",
-    "actions/setup-python",
-    "actions/download-artifact",
-    "actions/upload-artifact",
-    "softprops/action-gh-release",
-  ]) {
+  for (const action of approved.keys()) {
     assert.ok(remoteUses.includes(`${action}@${approved.get(action)}`), `${action} is missing`);
   }
 });
@@ -611,44 +472,13 @@ test("macOS DMG cleanup preserves both detach failures", () => {
   );
 });
 
-test("tag release reuses the protected macOS build and publishes both platforms", () => {
-  const workflow = fs
-    .readFileSync(path.join(repoRoot, ".github", "workflows", "release.yml"), "utf8")
-    .replace(/\r\n/g, "\n");
-  const publishJob = workflow.split("\n  publish-release:\n", 2)[1] || "";
-
-  assert.match(workflow, /^name: Release \(Windows and macOS ARM64\)$/m);
-  assert.match(
-    workflow,
-    /\n  build-macos-arm64:\n\s+uses: \.\/\.github\/workflows\/macos-private-build\.yml\n\s+secrets: inherit/
-  );
-  assert.doesNotMatch(workflow, /native\/wce_integrity/);
-  assert.doesNotMatch(workflow, /npm run dist:mac|npm run smoke:mac/);
-  assert.match(publishJob, /needs:\s*\n\s*- build-windows/);
-  assert.match(publishJob, /needs:[\s\S]*- build-macos-arm64/);
-  assert.match(publishJob, /merge-multiple: true/);
-});
-
-test("Windows packages are built only by the tag-triggered release workflow", () => {
-  const workflowsDir = path.join(repoRoot, ".github", "workflows");
-  const workflow = fs
-    .readFileSync(path.join(workflowsDir, "release.yml"), "utf8")
-    .replace(/\r\n/g, "\n");
-
-  // Desktop packaging is expensive; keep it off pull requests and main pushes.
-  assert.match(workflow, /^on:\n  push:\n    tags:\n      - "v\*"\n/m);
-  assert.match(workflow, /\n  build-windows:\n/);
-  assert.match(workflow, /\n  build-macos-arm64:\n/);
-
-  for (const entry of fs.readdirSync(workflowsDir)) {
-    const source = fs.readFileSync(path.join(workflowsDir, entry), "utf8");
-    if (!/npm run (?:dist|smoke):win/.test(source)) continue;
-    assert.equal(
-      entry,
-      "release.yml",
-      `${entry} packages the desktop app outside the tag-triggered release workflow`
-    );
-  }
+test("release publication consumes prebuilt packages without compiling the desktop", () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "release.yml"), "utf8");
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /actions\/download-artifact@/);
+  assert.match(workflow, /tools\/publish-desktop-release\.py/);
+  assert.match(workflow, /secrets\.CHANGELOG_URL/);
+  assert.doesNotMatch(workflow, /npm run (?:dist|build)|build-windows:|build-macos-arm64:|macos-private-build\.yml/);
 });
 
 test("macOS native window controls reserve the sidebar title-bar area", () => {

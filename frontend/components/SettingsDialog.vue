@@ -4,7 +4,8 @@
     class="settings-dialog theme-scope fixed inset-0 z-[20000] flex items-center justify-center bg-black/40 px-2 py-2 backdrop-blur-md sm:px-4 sm:py-8"
     @click.self="handleClose"
   >
-    <div class="settings-dialog-panel flex h-[80vh] min-h-[380px] w-full max-w-[880px] overflow-hidden rounded-[10px] border border-[#e2e2e2] bg-white shadow-2xl">
+    <!-- 所有栏目共用尺寸，避免滚动更新当前栏目时弹窗跳动。 -->
+    <div class="settings-dialog-panel flex h-[88vh] min-h-[380px] w-full max-w-[1000px] overflow-hidden rounded-[10px] border border-[#e2e2e2] bg-white shadow-2xl">
       <!-- Sidebar -->
       <aside class="hidden w-[160px] shrink-0 flex-col bg-[#fcfcfc] border-r border-[#eeeeee] sm:flex">
         <div class="mt-4 mb-2 flex items-center px-4 gap-2">
@@ -23,10 +24,10 @@
             :key="item.key"
             type="button"
             class="group flex w-full flex-col items-start rounded-[6px] px-3 py-1.5 text-left transition select-none"
-            :class="activeSection === item.key ? 'bg-white shadow-sm ring-1 ring-[#e5e5e5]' : 'hover:bg-[#f0f0f0]/60'"
-            @click="scrollToSection(item.key)"
+            :class="activeSection === item.key ? 'bg-[var(--app-accent)]' : 'hover:bg-[#f0f0f0]/60'"
+            @click="item.key === 'ai' ? openAiFeatures() : scrollToSection(item.key)"
           >
-            <div class="text-[12px] font-medium" :class="activeSection === item.key ? 'text-[#111]' : 'text-[#777] group-hover:text-[#333]'">
+            <div class="text-[12px] font-medium" :class="activeSection === item.key ? 'text-white' : 'text-[#777] group-hover:text-[#333]'">
               {{ item.label }}
             </div>
           </button>
@@ -251,6 +252,14 @@
             </div>
           </section>
 
+          <section ref="aiSectionRef">
+            <div class="mb-2.5 text-[12px] font-bold tracking-widest text-[var(--app-text-muted)]">AI 助手</div>
+            <button type="button" class="flex w-full items-center justify-between gap-4 rounded-[10px] border border-[var(--app-border)] bg-[var(--app-surface-bg)] px-3.5 py-3 text-left" @click="openAiFeatures">
+              <span><span class="block text-[13px] font-medium text-[var(--app-text-primary)]">高级版 AI 服务</span><span class="mt-0.5 block text-[11px] text-[var(--app-text-muted)]">聊天问答、内容总结与消息出处</span></span>
+              <span class="shrink-0 text-[12px] text-[var(--app-accent)]">了解高级版</span>
+            </button>
+          </section>
+
           <section ref="voiceSectionRef">
             <div class="mb-2.5 text-[12px] font-bold tracking-widest text-[var(--app-text-muted)]">语音转文字</div>
             <div class="divide-y divide-[var(--app-border-soft)] overflow-hidden rounded-[10px] border border-[var(--app-border)] bg-[var(--app-surface-bg)]">
@@ -258,7 +267,7 @@
                 <div class="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
                   <div class="min-w-0 flex-1">
                     <div class="text-[13px] font-medium text-[var(--app-text-primary)]">推理设备</div>
-                    <div class="mt-0.5 text-[11px] leading-relaxed text-[var(--app-text-muted)]">CPU 兼容所有设备；NVIDIA GPU 使用 CUDA 加速，初始化失败会自动回退 CPU。</div>
+                    <div class="mt-0.5 text-[11px] leading-relaxed text-[var(--app-text-muted)]">选择新模型时会匹配所需设备。Whisper 支持 GPU 失败后回退 CPU；Qwen GPU 不会自动切换模型。</div>
                   </div>
                   <div class="flex w-full shrink-0 overflow-hidden rounded-[6px] border border-[var(--app-border)] bg-[var(--app-surface-bg)] sm:w-auto" role="radiogroup" aria-label="语音转文字推理设备">
                     <button
@@ -267,7 +276,8 @@
                       :aria-checked="voiceDevicePreference === 'cpu'"
                       class="voice-setting-focus flex-1 px-2.5 py-1.5 text-[12px] transition disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
                       :class="voiceDevicePreference === 'cpu' ? 'bg-[var(--app-surface-muted)] text-[var(--app-accent)]' : 'text-[var(--app-text-secondary)] hover:bg-[var(--app-neutral-btn-hover)]'"
-                      :disabled="voiceDeviceBusy || voiceDeviceLocked"
+                      :disabled="voiceDeviceBusy || voiceDeviceLocked || !voiceSupportedDevices.includes('cpu')"
+                      :title="voiceSupportedDevices.includes('cpu') ? '使用 CPU 识别' : '当前模型需要 GPU，请先选择 CPU 模型'"
                       @click="setVoiceDevice('cpu')"
                     >
                       CPU
@@ -278,8 +288,8 @@
                       :aria-checked="voiceDevicePreference === 'cuda'"
                       class="voice-setting-focus flex-1 border-l border-[var(--app-border)] px-2.5 py-1.5 text-[12px] transition disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
                       :class="voiceDevicePreference === 'cuda' ? 'bg-[var(--app-surface-muted)] text-[var(--app-accent)]' : 'text-[var(--app-text-secondary)] hover:bg-[var(--app-neutral-btn-hover)]'"
-                      :disabled="voiceDeviceBusy || voiceDeviceLocked || !voiceCudaAvailable"
-                      :title="voiceCudaAvailable ? '使用 NVIDIA CUDA 加速' : (voiceCudaReason || '未检测到可用的 NVIDIA CUDA 设备')"
+                      :disabled="voiceDeviceBusy || voiceDeviceLocked || !voiceCudaAvailable || !voiceSupportedDevices.includes('cuda')"
+                      :title="!voiceSupportedDevices.includes('cuda') ? '当前模型仅使用 CPU，请先选择 GPU 模型' : voiceCudaAvailable ? '使用 NVIDIA CUDA 加速' : (voiceCudaReason || '未检测到可用的 NVIDIA CUDA 设备')"
                       @click="setVoiceDevice('cuda')"
                     >
                       NVIDIA GPU
@@ -287,7 +297,7 @@
                   </div>
                 </div>
 
-                <div v-if="voiceStatusLoading" class="mt-2 text-[11px] text-[var(--app-text-muted)]">正在检测本地 Whisper 与 CUDA 状态...</div>
+                <div v-if="voiceStatusLoading" class="mt-2 text-[11px] text-[var(--app-text-muted)]">正在检测语音模型与运行环境...</div>
                 <template v-else>
                   <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--app-text-secondary)]">
                     <span>已选：{{ voiceDeviceLabel }}</span>
@@ -306,16 +316,36 @@
               <div class="px-3.5 py-3">
                 <div class="flex flex-wrap items-start justify-between gap-2">
                   <div class="min-w-0 flex-1">
-                    <div class="text-[13px] font-medium text-[var(--app-text-primary)]">Whisper 模型</div>
-                    <div class="mt-0.5 text-[11px] leading-relaxed text-[var(--app-text-muted)]">模型需先下载到本机，再选择用于后续语音识别；本应用下载的模型可随时删除。</div>
+                    <div class="text-[13px] font-medium text-[var(--app-text-primary)]">语音识别模型</div>
+                    <div class="mt-0.5 text-[11px] leading-relaxed text-[var(--app-text-muted)]">低配电脑选 CTC；无独显选 Qwen CPU；有 NVIDIA 显卡可选 Turbo 或 Qwen GPU。下载并选择模型后，语音在本机处理。</div>
                   </div>
                   <span class="shrink-0 rounded-full bg-[var(--app-surface-muted)] px-2 py-1 text-[10px] text-[var(--app-text-secondary)]">当前：{{ voiceModelText }}</span>
                 </div>
 
+                <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div class="min-w-0">
+                    <label for="voice-model-download-source" class="text-[12px] font-medium text-[var(--app-text-primary)]">模型下载源</label>
+                    <p id="voice-model-download-source-hint" class="mt-0.5 text-[11px] leading-relaxed text-[var(--app-text-muted)]">仅影响新发起的模型下载。连接超时可切换后重试。</p>
+                  </div>
+                  <select
+                    id="voice-model-download-source"
+                    :value="voiceDownloadSource"
+                    :disabled="voiceStatusLoading || voiceDownloadSourceBusy"
+                    :aria-busy="voiceDownloadSourceBusy"
+                    aria-describedby="voice-model-download-source-hint"
+                    class="voice-setting-focus w-full rounded-[6px] border border-[var(--app-border)] bg-[var(--app-surface-bg)] px-2.5 py-1.5 text-[12px] text-[var(--app-text-primary)] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                    @change="setVoiceDownloadSource"
+                  >
+                    <option value="huggingface">官方源（Hugging Face）</option>
+                    <option value="hf-mirror">国内镜像（HF-Mirror）</option>
+                  </select>
+                </div>
+                <ErrorNotice v-if="voiceDownloadSourceError" :message="voiceDownloadSourceError" compact manual class="mt-1.5 text-[11px] text-[var(--danger-color)]" />
+
                 <div v-if="voiceStatusLoading" class="mt-3 grid gap-2 sm:grid-cols-2" aria-label="正在读取模型列表">
                   <div v-for="index in 4" :key="index" class="h-[134px] rounded-[9px] bg-[var(--app-surface-muted)]" />
                 </div>
-                <div v-else-if="voiceModels.length" class="mt-3 grid gap-2.5 sm:grid-cols-2" role="list" aria-label="可用 Whisper 模型">
+                <div v-else-if="voiceModels.length" id="voice-model-list" class="mt-3 grid gap-2.5 sm:grid-cols-2" role="list" aria-label="可用语音识别模型">
                   <article
                     v-for="model in voiceModels"
                     :key="model.id"
@@ -337,6 +367,17 @@
                     </div>
 
                     <div class="mt-1.5 line-clamp-2 text-[10px] leading-relaxed text-[var(--app-text-secondary)]">{{ model.description }}</div>
+                    <div v-if="!model.runtimeAvailable" class="mt-1.5 text-[11px] leading-relaxed text-[var(--app-text-secondary)]">{{ model.runtimeReason }}</div>
+                    <div v-if="model.runtimeComponent && !model.runtimeComponent.installed && !model.runtimeAvailable" class="mt-1 text-[11px] text-[var(--app-text-muted)]">
+                      运行组件约 {{ formatBytes(model.runtimeComponent.size) }}，下载和解压需约 9 GB 可用空间。
+                    </div>
+                    <div v-if="qwenIsActive(model) || ['paused', 'error'].includes(model.runtimeComponent?.job?.status)" class="mt-2 text-[11px] leading-relaxed" data-qwen-runtime-status>
+                      <p role="status" class="text-[var(--app-text-secondary)]">{{ qwenStageText(model) }}</p>
+                      <p v-if="qwenIsActive(model) && model.runtimeComponent.job.stage !== 'downloading_model'" class="tabular-nums text-[var(--app-text-muted)]">
+                        {{ formatBytes(model.runtimeComponent.job.bytes || 0) }} / {{ formatBytes(model.runtimeComponent.job.total || model.runtimeComponent.size) }}
+                      </p>
+                      <p v-if="model.runtimeComponent.job.error" role="alert" class="break-words text-[var(--danger-color)]">{{ model.runtimeComponent.job.error }}</p>
+                    </div>
                     <div v-if="isVoiceModelDownloading(model)" class="mt-2" data-voice-model-progress>
                       <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[10px] leading-relaxed">
                         <span class="text-[var(--app-text-secondary)]">{{ voiceModelDownloadStageText(model) }}</span>
@@ -363,20 +404,35 @@
 
                     <div class="mt-auto flex flex-wrap items-center justify-end gap-1.5 pt-2">
                       <button
-                        v-if="model.downloaded && !model.selected"
+                        v-if="qwenNeedsPreparation(model)"
+                        type="button"
+                        class="voice-setting-focus whitespace-normal rounded-[5px] bg-[var(--app-accent)] px-2 py-1 text-[11px] font-medium text-white transition hover:bg-[var(--app-accent-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+                        :disabled="voiceModelLocked || !model.runtimeComponent.supported || qwenIsActive(model) || isVoiceModelActionBusy(model.id)"
+                        :title="voiceModelLocked ? '模型由启动环境变量固定' : model.runtimeComponent.reason || '安装所需运行组件和模型，检查显卡后启用'"
+                        @click="prepareQwenModel(model)"
+                      >{{ qwenButtonText(model) }}</button>
+                      <button
+                        v-if="qwenIsActive(model)"
+                        type="button"
+                        class="voice-setting-focus rounded-[5px] border border-[var(--app-border)] px-2 py-1 text-[11px] text-[var(--app-text-secondary)] disabled:opacity-50"
+                        :disabled="isVoiceModelActionBusy(model.id)"
+                        @click="pauseQwenModel(model)"
+                      >暂停</button>
+                      <button
+                        v-if="model.downloaded && !model.selected && !qwenNeedsPreparation(model)"
                         type="button"
                         class="voice-setting-focus rounded-[5px] border border-[var(--app-border)] bg-[var(--app-surface-bg)] px-2 py-1 text-[10px] font-medium text-[var(--app-accent)] transition hover:bg-[var(--app-neutral-btn-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                        :disabled="voiceModelLocked || isVoiceModelActionBusy(model.id)"
-                        :title="voiceModelLocked ? '模型由启动环境变量固定' : `选择 ${model.name}`"
+                        :disabled="voiceModelLocked || !model.runtimeAvailable || qwenPreparationActive || isVoiceModelActionBusy(model.id)"
+                        :title="voiceModelLocked ? '模型由启动环境变量固定' : !model.runtimeAvailable ? model.runtimeReason : `选择 ${model.name}`"
                         @click="selectVoiceModel(model)"
                       >
                         {{ isVoiceModelActionBusy(model.id, 'select') ? '选择中...' : '选择' }}
                       </button>
                       <button
-                        v-if="!model.downloaded && !isVoiceModelDeletePending(model.id)"
+                        v-if="!model.downloaded && !isVoiceModelDeletePending(model.id) && !qwenNeedsPreparation(model)"
                         type="button"
                         class="voice-setting-focus whitespace-nowrap rounded-[5px] bg-[var(--app-accent)] px-2 py-1 text-[10px] font-medium text-white transition hover:bg-[var(--app-accent-hover)] disabled:cursor-not-allowed disabled:opacity-40"
-                        :disabled="!model.downloadable || isVoiceModelDownloading(model) || isVoiceModelActionBusy(model.id)"
+                        :disabled="voiceDownloadSourceBusy || !model.downloadable || isVoiceModelDownloading(model) || isVoiceModelActionBusy(model.id)"
                         :title="model.downloadable ? `下载 ${model.name}` : (model.reason || '当前无法下载')"
                         @click="startVoiceModelDownload(model)"
                       >
@@ -386,7 +442,7 @@
                         v-if="canDeleteVoiceModel(model)"
                         type="button"
                         class="voice-setting-focus rounded-[5px] border border-[var(--app-border)] px-2 py-1 text-[10px] text-[var(--danger-color)] transition hover:bg-[var(--app-neutral-btn-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-                        :disabled="isVoiceModelDeletePending(model.id)"
+                        :disabled="isVoiceModelDeletePending(model.id) || qwenIsActive(model)"
                         :title="isVoiceModelDownloading(model) || isVoiceModelActionBusy(model.id, 'download') ? `停止下载并删除 ${model.name}` : `删除本机上的 ${model.name}`"
                         @click="removeVoiceModel(model)"
                       >
@@ -398,6 +454,7 @@
                 <div v-else-if="!voiceDeviceError" class="mt-3 rounded-[8px] bg-[var(--app-surface-soft)] px-3 py-4 text-center text-[11px] text-[var(--app-text-muted)]">后端未返回可用模型列表。</div>
 
                 <div v-if="voiceModelLocked" class="mt-2 text-[11px] leading-relaxed text-[var(--app-text-secondary)]">模型由 WECHAT_TOOL_WHISPER_MODEL 环境变量固定，界面中不可切换。</div>
+                <div v-if="voiceModelMigrationMessage" role="status" class="mt-2 text-[11px] leading-relaxed text-[var(--app-text-secondary)]">{{ voiceModelMigrationMessage }}</div>
                 <div v-if="voiceStatusReason" class="mt-2 text-[11px] leading-relaxed text-[var(--app-text-muted)]">{{ voiceStatusReason }}</div>
                 <div v-if="voiceModelMessage" class="mt-2 text-[11px] text-[var(--app-accent)]">{{ voiceModelMessage }}</div>
                 <ErrorNotice v-if="voiceModelError" :message="voiceModelError" compact manual class="mt-1.5 text-[11px] text-[var(--danger-color)]" />
@@ -408,7 +465,7 @@
                   <div class="min-w-0 flex-1">
                     <div class="text-[13px] font-medium text-[var(--app-text-primary)]">本项目转写数据</div>
                     <div class="mt-0.5 text-[11px] leading-relaxed text-[var(--app-text-muted)]">
-                      删除所有账号中由本项目 Whisper 生成的转写文字。微信原生转写、原始语音和模型都会保留。
+                      删除所有账号中由本项目本地模型生成的转写文字。微信原生转写、原始语音和模型都会保留。
                     </div>
                   </div>
                   <button
@@ -431,105 +488,6 @@
                   {{ voiceTranscriptDeleteWarning }}
                 </div>
                 <ErrorNotice v-if="voiceTranscriptDeleteError" :message="voiceTranscriptDeleteError" compact manual class="mt-1.5 text-[11px] text-[var(--danger-color)]" />
-              </div>
-            </div>
-          </section>
-
-          <section ref="mcpSectionRef">
-            <div class="mb-2.5 text-[12px] font-bold text-[#999] tracking-widest">MCP 接入</div>
-            <div class="overflow-hidden rounded-[10px] border border-[#e7e7e7] bg-white divide-y divide-[#ececec]">
-              <div class="px-3.5 py-3">
-                <div class="flex items-center justify-between gap-3">
-                  <div class="min-w-0 flex-1">
-                    <div class="text-[13px] font-medium text-[#222]">允许局域网接入 MCP</div>
-                    <div class="mt-0.5 text-[11px] leading-relaxed text-[#909090]">开启后后端监听 0.0.0.0，同一局域网内的其他设备可通过接入提示词中的地址接入。</div>
-                    <div class="mt-0.5 text-[11px] leading-relaxed text-[#909090] break-all">当前地址：{{ mcpEndpoint }}</div>
-                    <div v-if="mcpLanAccessMessage" class="mt-1 text-[11px] leading-relaxed text-[#1b6b43]">{{ mcpLanAccessMessage }}</div>
-                    <ErrorNotice v-if="mcpLanAccessError" :message="mcpLanAccessError" compact manual class="mt-1 text-[11px] leading-relaxed text-red-600" />
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    :aria-checked="mcpLanAccessEnabled"
-                    class="settings-switch shrink-0"
-                    :class="switchTrackClass(mcpLanAccessEnabled, mcpLanAccessLoading)"
-                    :disabled="mcpLanAccessLoading"
-                    @click="toggleMcpLanAccess"
-                  >
-                    <span class="settings-switch-thumb" :class="mcpLanAccessEnabled ? 'translate-x-[20px]' : 'translate-x-0'" />
-                  </button>
-                </div>
-              </div>
-
-              <div class="px-3.5 py-3">
-                <div class="flex flex-col gap-2">
-                  <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div class="min-w-0 flex-1">
-                      <div class="text-[13px] font-medium text-[#222]">MCP Token</div>
-                      <div class="mt-0.5 text-[11px] leading-relaxed text-[#909090]">客户端请求 MCP 时使用 Bearer token。</div>
-                      <ErrorNotice v-if="mcpTokenError" :message="mcpTokenError" compact manual class="mt-1 text-[11px] leading-relaxed text-red-600" />
-                    </div>
-                    <div class="flex shrink-0 gap-1.5">
-                      <button
-                        type="button"
-                        class="rounded-[6px] border border-[#e2e2e2] bg-white px-2 py-1 text-[12px] text-[#222] transition hover:bg-[#f9f9f9]"
-                        :disabled="mcpTokenLoading || !mcpToken"
-                        @click="copyMcpText('token', mcpToken)"
-                      >
-                        {{ mcpCopiedKey === 'token' ? '已复制' : (mcpTokenLoading ? '加载中...' : '复制 Token') }}
-                      </button>
-                      <button
-                        type="button"
-                        class="rounded-[6px] border border-[#e2e2e2] bg-white px-2 py-1 text-[12px] text-[#222] transition hover:bg-[#f9f9f9]"
-                        :disabled="mcpTokenLoading"
-                        @click="resetMcpToken"
-                      >
-                        {{ mcpCopiedKey === 'token-reset' ? '已重置' : '重置' }}
-                      </button>
-                    </div>
-                  </div>
-                  <pre class="max-h-[92px] overflow-auto rounded-[6px] bg-[#f7f7f7] px-2.5 py-2 text-[11px] leading-relaxed text-[#333] scrollbar-custom whitespace-pre-wrap">{{ mcpTokenText }}</pre>
-                </div>
-              </div>
-
-              <div class="px-3.5 py-3">
-                <div class="flex flex-col gap-2">
-                  <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div class="min-w-0 flex-1">
-                      <div class="text-[13px] font-medium text-[#222]">AI 接入提示词</div>
-                      <div class="mt-0.5 text-[11px] leading-relaxed text-[#909090]">复制到 AI 客户端的系统提示词或连接说明里。</div>
-                    </div>
-                    <button
-                      type="button"
-                      class="shrink-0 rounded-[6px] border border-[#e2e2e2] bg-white px-2 py-1 text-[12px] text-[#222] transition hover:bg-[#f9f9f9]"
-                      @click="copyMcpText('ai-prompt', mcpAiPrompt)"
-                    >
-                      {{ mcpCopiedKey === 'ai-prompt' ? '已复制' : '复制提示词' }}
-                    </button>
-                  </div>
-                  <pre class="max-h-[220px] overflow-auto rounded-[6px] bg-[#f7f7f7] px-2.5 py-2 text-[11px] leading-relaxed text-[#333] scrollbar-custom whitespace-pre-wrap">{{ mcpAiPrompt }}</pre>
-                </div>
-              </div>
-
-              <div class="px-3.5 py-3">
-                <div class="flex flex-col gap-2">
-                  <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div class="min-w-0 flex-1">
-                      <div class="text-[13px] font-medium text-[#222]">Skill Markdown</div>
-                      <div class="mt-0.5 text-[11px] leading-relaxed text-[#909090]">单独复制到 AI 客户端的 skill 或知识配置。</div>
-                      <ErrorNotice v-if="mcpSkillBundleError" :message="mcpSkillBundleError" compact manual class="mt-1 text-[11px] leading-relaxed text-red-600" />
-                    </div>
-                    <button
-                      type="button"
-                      class="shrink-0 rounded-[6px] border border-[#e2e2e2] bg-white px-2 py-1 text-[12px] text-[#222] transition hover:bg-[#f9f9f9]"
-                      :disabled="mcpSkillBundleLoading"
-                      @click="copyMcpText('skill', mcpSkillText)"
-                    >
-                      {{ mcpCopiedKey === 'skill' ? '已复制' : (mcpSkillBundleLoading ? '加载中...' : '复制 Skill') }}
-                    </button>
-                  </div>
-                  <pre class="max-h-[420px] overflow-auto rounded-[6px] bg-[#f7f7f7] px-2.5 py-2 text-[11px] leading-relaxed text-[#333] scrollbar-custom whitespace-pre-wrap">{{ mcpSkillText }}</pre>
-                </div>
               </div>
             </div>
           </section>
@@ -579,9 +537,9 @@
                       type="button"
                       class="shrink-0 rounded-[6px] border border-[#e2e2e2] bg-white px-2 py-1 text-[12px] text-[#222] transition hover:bg-[#f9f9f9] disabled:cursor-not-allowed disabled:opacity-50"
                       :disabled="!item.value"
-                      @click="copyMcpText(item.key, item.value)"
+                      @click="copyKeyValue(item.key, item.value)"
                     >
-                      {{ mcpCopiedKey === item.key ? '已复制' : '复制' }}
+                      {{ copiedKey === item.key ? '已复制' : '复制' }}
                     </button>
                   </div>
                   <pre class="max-h-[80px] overflow-auto rounded-[6px] bg-[#f7f7f7] px-2.5 py-2 text-[11px] leading-relaxed text-[#333] scrollbar-custom whitespace-pre-wrap break-all">{{ item.value || (keysLoaded ? '未获取到' : '—') }}</pre>
@@ -625,7 +583,7 @@
                 <div class="flex items-center justify-between gap-3">
                   <div class="min-w-0 flex-1">
                     <div class="text-[13px] font-medium text-[#222]">自动获取原图</div>
-                    <div class="mt-0.5 text-[11px] text-[#909090]">本地缺原图时自动联网拉取原图（每账号每天最多 {{ cdnImageDailyLimit }} 张）。关闭后仅显示本地已有图片。</div>
+                    <div class="mt-0.5 text-[11px] text-[#909090]">本地缺原图时自动联网拉取原图，按套餐额度计费。关闭后仅显示本地已有图片。</div>
                   </div>
                   <button
                     type="button"
@@ -636,6 +594,21 @@
                     @click="toggleCdnImage"
                   >
                     <span class="settings-switch-thumb" :class="cdnImageEnabled ? 'translate-x-[20px]' : 'translate-x-0'" />
+                  </button>
+                </div>
+              </div>
+              <div class="px-3.5 py-3">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="min-w-0 flex-1">
+                    <div class="text-[13px] font-medium text-[#222]">套餐与额度</div>
+                    <div class="mt-0.5 text-[11px] text-[#909090]">查看当前版本、剩余额度与重置时间，输入兑换码激活。</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="shrink-0 rounded-[6px] border border-[#e2e2e2] bg-[#fafafa] px-2.5 py-1 text-[12px] text-[#222] transition hover:bg-[#f0f0f0]"
+                    @click="openPlanWindow('manual')"
+                  >
+                    打开套餐
                   </button>
                 </div>
               </div>
@@ -725,11 +698,13 @@ const props = defineProps({
 
 const emit = defineEmits(['close'])
 const api = useApi()
+const { openPlanWindow } = usePlanWindow()
+const { openDialog: openAdvancedFeaturesDialog } = useAdvancedFeaturesDialog()
 
 const settingNavItems = [
   { key: 'desktop', label: '桌面行为', hint: '启动 / 关闭 / 端口' },
+  { key: 'ai', label: 'AI 助手', hint: '高级版功能' },
   { key: 'voice', label: '语音转文字', hint: 'CPU / NVIDIA GPU' },
-  { key: 'mcp', label: 'MCP 接入', hint: '局域网 / Skill / 工具' },
   { key: 'keys', label: '数据库与密钥', hint: '密钥查看 / 复制' },
   { key: 'startup', label: '启动偏好', hint: '默认页面' },
   { key: 'media', label: '聊天与媒体', hint: '原图获取' },
@@ -742,7 +717,7 @@ const contentScrollRef = ref(null)
 const desktopSectionRef = ref(null)
 const desktopLogFileRef = ref(null)
 const voiceSectionRef = ref(null)
-const mcpSectionRef = ref(null)
+const aiSectionRef = ref(null)
 const keysSectionRef = ref(null)
 const startupSectionRef = ref(null)
 const mediaSectionRef = ref(null)
@@ -758,11 +733,10 @@ const desktopVersionText = computed(() => {
   return v || '—'
 })
 
-const desktopDefaultToChatWhenData = ref(false)
+const desktopDefaultToChatWhenData = ref(true)
 
 const cdnImageEnabled = ref(false)
 const cdnImageLoading = ref(false)
-const cdnImageDailyLimit = ref(10)
 const snsUseCache = ref(true)
 
 const desktopAutoLaunch = ref(false)
@@ -908,13 +882,18 @@ const voiceDeviceError = ref('')
 const voiceDevicePreference = ref('cpu')
 const voiceDeviceSource = ref('default')
 const voiceActiveDevice = ref('')
-const voiceModel = ref('medium')
+const voiceModel = ref('zipformer-small-ctc-int8')
 const voiceModels = ref([])
+const voiceDownloadSource = ref('huggingface')
+const voiceDownloadSourceBusy = ref(false)
+const voiceDownloadSourceError = ref('')
+const voiceSupportedDevices = ref(['cpu', 'cuda'])
 const voiceModelSource = ref('default')
 const voiceModelAction = ref({ id: '', type: '' })
 const voiceModelDeletePendingIds = ref([])
 const voiceModelError = ref('')
 const voiceModelMessage = ref('')
+const voiceModelMigrationMessage = ref('')
 const voiceTranscriptDeleteBusy = ref(false)
 const voiceTranscriptDeleteError = ref('')
 const voiceTranscriptDeleteMessage = ref('')
@@ -929,7 +908,7 @@ const voiceDeviceLocked = computed(() => voiceDeviceSource.value === 'env')
 const voiceModelLocked = computed(() => voiceModelSource.value === 'env')
 const voiceCudaAvailable = computed(() => !!voiceCuda.value?.available)
 const voiceCudaReason = computed(() => String(voiceCuda.value?.reason || '').trim())
-const voiceModelText = computed(() => String(voiceModel.value || 'medium').trim() || 'medium')
+const voiceModelText = computed(() => voiceModels.value.find(model => model.id === voiceModel.value)?.name || voiceModel.value || 'zipformer-small-ctc-int8')
 const voiceDeviceLabel = computed(() => voiceDevicePreference.value === 'cuda' ? 'NVIDIA GPU' : 'CPU')
 const voiceCudaDeviceLabels = computed(() => {
   const devices = Array.isArray(voiceCuda.value?.devices) ? voiceCuda.value.devices : []
@@ -942,78 +921,8 @@ const voiceActiveDeviceLabel = computed(() => {
   return 'CPU'
 })
 
-const mcpLanAccessEnabled = ref(false)
-const mcpLanAccessLoading = ref(false)
-const mcpLanAccessError = ref('')
-const mcpLanAccessMessage = ref('')
-const mcpToken = ref('')
-const mcpTokenLoading = ref(false)
-const mcpTokenError = ref('')
-const mcpSkillBundleText = ref('')
-const mcpSkillBundleLoading = ref(false)
-const mcpSkillBundleError = ref('')
-const mcpCopiedKey = ref('')
-const mcpAccessHost = ref('')
-const mcpAccessEndpoint = ref('')
-let mcpCopiedTimer = null
-
-const mcpPortText = computed(() => {
-  const n = Number(String(desktopBackendPortInput.value || '').trim())
-  if (Number.isInteger(n) && n >= 1 && n <= 65535) return String(n)
-  return '10392'
-})
-
-const mcpEndpoint = computed(() => {
-  const reported = String(mcpAccessEndpoint.value || '').trim()
-  if (/^https?:\/\//i.test(reported)) return reported
-  const reportedHost = String(mcpAccessHost.value || '').trim()
-  if (reportedHost) return `http://${reportedHost}:${mcpPortText.value}/mcp`
-  if (!process.client || typeof window === 'undefined') return `http://127.0.0.1:${mcpPortText.value}/mcp`
-  const apiBase = useApiBase()
-  if (/^https?:\/\//i.test(apiBase)) {
-    try {
-      const u = new URL(apiBase)
-      return `${u.origin}/mcp`
-    } catch {}
-  }
-  const protocol = window.location?.protocol === 'https:' ? 'https:' : 'http:'
-  const host = String(window.location?.hostname || '127.0.0.1').trim() || '127.0.0.1'
-  return `${protocol}//${host}:${mcpPortText.value}/mcp`
-})
-
-const applyMcpAccessInfo = (resp) => {
-  if (!resp || typeof resp !== 'object') return
-  const accessHost = String(resp.accessHost || resp.access_host || '').trim()
-  const endpoint = String(resp.mcpEndpoint || resp.mcp_endpoint || '').trim()
-  if (accessHost) mcpAccessHost.value = accessHost
-  if (/^https?:\/\//i.test(endpoint)) mcpAccessEndpoint.value = endpoint
-}
-
-const mcpSkillFallback = [
-  '# WeChat MCP Copilot',
-  '',
-  'Use WeChatDataAnalysis MCP like an investigator: start broad, resolve fuzzy targets, then fetch only the context needed to answer.',
-  '',
-  'Core rules:',
-  '1. Start with initialize and tools/list.',
-  '2. Prefer compact mobile facade tools before low-level tools.',
-  '3. Keep limits small, page results, and expand only when needed.',
-  '4. Use returned URLs for media and exports instead of inlining binary content.',
-].join('\n')
-const mcpAiPrompt = computed(() => [
-  '你现在可以通过 WeChatDataAnalysis MCP 访问本机微信数据。',
-  `MCP endpoint: ${mcpEndpoint.value}`,
-  `Authorization: Bearer ${mcpToken.value || '<MCP_TOKEN>'}`,
-  '',
-  '接入要求：',
-  '1. 使用 JSON-RPC 2.0 POST 到 MCP endpoint，Content-Type 为 application/json，并带上 Authorization Bearer token。',
-  '2. 先调用 initialize，再用 tools/list 分页读取工具 schema。',
-  '3. 工具调用使用 tools/call，优先读取 result.structuredContent。',
-  '4. 不要一次性请求大结果；按下方 skill 的分页和上下文预算逐步扩展。',
-  '5. 媒体、导出和 SSE 进度按返回 URL 在 App 侧加载，不要让模型内联二进制内容。',
-].join('\n'))
-const mcpSkillText = computed(() => mcpSkillBundleText.value || mcpSkillFallback)
-const mcpTokenText = computed(() => mcpToken.value || '加载中...')
+const copiedKey = ref('')
+let copiedKeyTimer = null
 
 const switchTrackClass = (enabled, disabled = false) => {
   if (disabled) return enabled ? 'bg-[#07b75b] opacity-50 cursor-not-allowed' : 'bg-[#d0d0d0] opacity-50 cursor-not-allowed'
@@ -1053,8 +962,8 @@ const refreshDesktopOutputDirProgress = async () => {
 
 const sectionElements = computed(() => [
   { key: 'desktop', el: desktopSectionRef.value },
+  { key: 'ai', el: aiSectionRef.value },
   { key: 'voice', el: voiceSectionRef.value },
-  { key: 'mcp', el: mcpSectionRef.value },
   { key: 'keys', el: keysSectionRef.value },
   { key: 'startup', el: startupSectionRef.value },
   { key: 'media', el: mediaSectionRef.value },
@@ -1067,20 +976,32 @@ const scrollToSection = (key) => {
   const target = sectionElements.value.find((item) => item.key === key)?.el
   activeSection.value = key
   if (!scrollHost || !target) return
+  // offsetTop 相对定位祖先计算，会把设置页固定标题栏的高度重复计入。
+  const targetTop = scrollHost.scrollTop + target.getBoundingClientRect().top - scrollHost.getBoundingClientRect().top
   scrollHost.scrollTo({
-    top: Math.max(0, target.offsetTop - 10),
+    top: Math.max(0, targetTop - 10),
     behavior: 'smooth',
   })
 }
 
 const scrollToFocusTarget = async () => {
   const focusTarget = String(props.focusTarget || '').trim()
+  if (focusTarget === 'ai') {
+    await nextTick()
+    scrollToSection('ai')
+    return
+  }
   if (focusTarget === 'voice') {
     await nextTick()
     scrollToSection('voice')
     return
   }
-  if (focusTarget !== 'log-file') return
+  if (focusTarget !== 'log-file') {
+    // 弹窗重新挂载后滚动区回到顶部，同步栏目标题，避免沿用上次高亮。
+    await nextTick()
+    onContentScroll()
+    return
+  }
   await nextTick()
   activeSection.value = 'desktop'
   const scrollHost = contentScrollRef.value
@@ -1109,16 +1030,22 @@ const onContentScroll = () => {
     }
   }
   const position = scrollHost.scrollTop + 120
+  const hostTop = scrollHost.getBoundingClientRect().top
   let current = settingNavItems[0].key
   for (const section of sectionElements.value) {
     if (!section.el) continue
-    if (section.el.offsetTop <= position) current = section.key
+    if (scrollHost.scrollTop + section.el.getBoundingClientRect().top - hostTop <= position) current = section.key
   }
   activeSection.value = current
 }
 
 const handleClose = () => {
   emit('close')
+}
+
+const openAiFeatures = () => {
+  handleClose()
+  openAdvancedFeaturesDialog()
 }
 
 const onEscKeydown = (event) => {
@@ -1199,11 +1126,14 @@ const canDeleteVoiceModel = (model) => !!model?.id && (
 
 const applyVoiceTranscriptionStatus = (status) => {
   if (!status || typeof status !== 'object') return
+  voiceDownloadSource.value = status.modelDownloadSource === 'hf-mirror' ? 'hf-mirror' : 'huggingface'
   const requestedDevice = String(status.requestedDevice || status.device || 'cpu').trim().toLowerCase()
   voiceDevicePreference.value = requestedDevice === 'cuda' ? 'cuda' : 'cpu'
   voiceDeviceSource.value = String(status.deviceSource || 'default').trim() || 'default'
   voiceActiveDevice.value = String(status.activeDevice || '').trim().toLowerCase()
-  voiceModel.value = String(status.model || 'medium').trim() || 'medium'
+  voiceSupportedDevices.value = Array.isArray(status.supportedDevices) ? status.supportedDevices : ['cpu', 'cuda']
+  voiceModelMigrationMessage.value = String(status.modelMigrationMessage || '')
+  voiceModel.value = String(status.model || 'zipformer-small-ctc-int8').trim() || 'zipformer-small-ctc-int8'
   voiceModelSource.value = String(status.modelSettingSource || 'default').trim() || 'default'
   voiceModels.value = (Array.isArray(status.models) ? status.models : []).map((item) => {
     const id = String(item?.id || '').trim()
@@ -1223,6 +1153,9 @@ const applyVoiceTranscriptionStatus = (status) => {
       quality: String(item?.quality || '质量未知').trim(),
       description: String(item?.description || '').trim(),
       recommended: item?.recommended === true,
+      runtimeAvailable: item?.runtimeAvailable !== false,
+      runtimeReason: String(item?.runtimeReason || '缺少运行组件，请更新应用或选择其他模型。'),
+      runtimeComponent: item?.runtimeComponent || null,
       selected: item?.selected === true || id === voiceModel.value,
       downloaded,
       downloadable: item?.downloadable !== false,
@@ -1248,6 +1181,49 @@ const applyVoiceTranscriptionStatus = (status) => {
 }
 
 const isVoiceModelDownloading = (model) => ['queued', 'running'].includes(String(model?.downloadStatus || '').toLowerCase())
+
+const qwenIsActive = (model) => ['queued', 'running'].includes(model?.runtimeComponent?.job?.status)
+const qwenPreparationActive = computed(() => voiceModels.value.some(qwenIsActive))
+const qwenNeedsPreparation = (model) => !!model?.runtimeComponent && (
+  !model.downloaded || !model.runtimeAvailable || qwenIsActive(model)
+  || ['paused', 'error'].includes(model.runtimeComponent.job?.status)
+)
+const qwenStageText = (model) => {
+  const job = model?.runtimeComponent?.job || {}
+  if (job.stage === 'downloading_model') return `正在下载模型 ${job.modelPercent || 0}%`
+  return ({ preparing: '准备安装', downloading: '正在下载 GPU 组件', retry_wait: '网络中断，正在重试',
+    verifying: '正在校验组件', installing: '正在安装组件', checking_runtime: '正在检查显卡和组件',
+    checking_model: '正在检查模型', paused: '安装已暂停，可继续', error: '安装或启用失败', done: '已启用' })[job.stage] || '等待安装'
+}
+const qwenButtonText = (model) => {
+  if (qwenIsActive(model)) return qwenStageText(model)
+  if (model.runtimeComponent?.job?.status === 'paused') return '继续安装并启用'
+  if (model.runtimeComponent?.job?.status === 'error') return '重试并启用'
+  return model.downloaded ? '安装 GPU 组件并启用' : '下载并启用'
+}
+const updateQwenComponent = (component) => {
+  voiceModels.value = voiceModels.value.map((model) => model.id === 'qwen3-asr-06b-hf'
+    ? { ...model, runtimeComponent: component } : model)
+}
+const prepareQwenModel = async (model) => {
+  if (voiceModelLocked.value || qwenIsActive(model) || isVoiceModelActionBusy(model.id)) return
+  voiceModelAction.value = { id: model.id, type: 'prepare' }
+  voiceModelError.value = ''
+  try {
+    updateQwenComponent(await api.prepareQwenGpu())
+    scheduleVoiceModelDownloadPolling()
+  } catch (e) {
+    voiceModelError.value = e?.message || 'GPU 组件安装无法启动，请重试。'
+  } finally {
+    voiceModelAction.value = { id: '', type: '' }
+  }
+}
+const pauseQwenModel = async (model) => {
+  voiceModelAction.value = { id: model.id, type: 'pause' }
+  try { updateQwenComponent(await api.pauseQwenGpu()) }
+  catch (e) { voiceModelError.value = e?.message || '暂停失败，请重试。' }
+  finally { voiceModelAction.value = { id: '', type: '' } }
+}
 
 const voiceModelDownloadPercent = (model) => normalizeVoiceModelDownloadPercent(model?.downloadPercent)
 
@@ -1286,6 +1262,9 @@ const isVoiceModelActionBusy = (modelId, type = '') => {
 }
 
 const voiceModelStateText = (model) => {
+  if (qwenIsActive(model)) return '准备启用'
+  if (model.runtimeComponent?.job?.status === 'error') return '启用失败'
+  if (!model.runtimeAvailable) return model.downloaded ? '模型已下载 · 缺少组件' : '缺少组件'
   const status = String(model?.downloadStatus || '').toLowerCase()
   if (status === 'queued') return '等待下载'
   if (status === 'running') return `正在下载 ${voiceModelDownloadPercent(model)}%`
@@ -1295,6 +1274,7 @@ const voiceModelStateText = (model) => {
 }
 
 const voiceModelStateClass = (model) => {
+  if (!model.runtimeAvailable || model.runtimeComponent?.job?.status === 'error') return 'text-[var(--app-text-secondary)]'
   const status = String(model?.downloadStatus || '').toLowerCase()
   if (isVoiceModelDownloading(model) || model?.downloaded) return 'text-[var(--app-accent)]'
   if (status === 'error') return 'text-[var(--danger-color)]'
@@ -1349,9 +1329,18 @@ const pollVoiceModelDownloads = async () => {
     && model.downloadJobId
     && !isVoiceModelDeletePending(model.id)
   ))
-  if (!active.length) return
+  if (!active.length && !qwenPreparationActive.value) return
 
   let terminalJobSeen = false
+  if (qwenPreparationActive.value) {
+    try {
+      const component = await api.getQwenGpuStatus()
+      updateQwenComponent(component)
+      terminalJobSeen = !['queued', 'running'].includes(component.job?.status)
+    } catch (e) {
+      voiceModelError.value = e?.message || '读取 GPU 组件安装进度失败，将继续重试。'
+    }
+  }
   await Promise.all(active.map(async (model) => {
     const generation = voiceModelDownloadGeneration(model.id)
     try {
@@ -1383,7 +1372,7 @@ function scheduleVoiceModelDownloadPolling() {
     isVoiceModelDownloading(model)
     && model.downloadJobId
     && !isVoiceModelDeletePending(model.id)
-  ))) return
+  )) && !qwenPreparationActive.value) return
   voiceModelDownloadTimer = setTimeout(async () => {
     voiceModelDownloadTimer = null
     await pollVoiceModelDownloads()
@@ -1391,6 +1380,7 @@ function scheduleVoiceModelDownloadPolling() {
 }
 
 const startVoiceModelDownload = async (model) => {
+  if (voiceDownloadSourceBusy.value) return
   if (!model?.id || !model.downloadable || isVoiceModelDownloading(model) || isVoiceModelActionBusy(model.id)) return
   const generation = voiceModelDownloadGeneration(model.id)
   voiceModelAction.value = { id: model.id, type: 'download' }
@@ -1416,7 +1406,7 @@ const startVoiceModelDownload = async (model) => {
 }
 
 const selectVoiceModel = async (model) => {
-  if (!model?.id || !model.downloaded || model.selected || voiceModelLocked.value || isVoiceModelActionBusy(model.id)) return
+  if (!model?.id || !model.downloaded || !model.runtimeAvailable || model.selected || voiceModelLocked.value || isVoiceModelActionBusy(model.id)) return
   const generation = voiceModelDownloadGeneration(model.id)
   voiceModelAction.value = { id: model.id, type: 'select' }
   voiceModelError.value = ''
@@ -1494,7 +1484,7 @@ const voiceTranscriptDeleteErrorMessage = (error) => {
 
 const deleteAllProjectVoiceTranscripts = async () => {
   if (voiceTranscriptDeleteBusy.value) return
-  const confirmation = '此操作不可撤销：将删除所有账号中由本项目 Whisper 生成的全部转写文字。微信原生转写、原始语音和已下载模型都会保留。确定继续吗？'
+  const confirmation = '此操作不可撤销：将删除所有账号中由本项目本地模型生成的全部转写文字。微信原生转写、原始语音和已下载模型都会保留。确定继续吗？'
   if (!window.confirm(confirmation)) return
 
   voiceTranscriptDeleteBusy.value = true
@@ -1537,6 +1527,24 @@ const refreshVoiceTranscriptionStatus = async () => {
   }
 }
 
+const setVoiceDownloadSource = async (event) => {
+  const select = event.target
+  const next = select.value
+  if (voiceDownloadSourceBusy.value || next === voiceDownloadSource.value) return
+  voiceDownloadSourceBusy.value = true
+  voiceDownloadSourceError.value = ''
+  try {
+    const resp = await api.setVoiceTranscriptionSettings({ download_source: next })
+    applyVoiceTranscriptionStatus(resp?.configuration || resp)
+  } catch (error) {
+    voiceDownloadSourceError.value = error?.message || '切换模型下载源失败，请重试'
+  } finally {
+    // 保存失败时恢复实际选项，避免界面与后端使用不同的下载源。
+    select.value = voiceDownloadSource.value
+    voiceDownloadSourceBusy.value = false
+  }
+}
+
 const setVoiceDevice = async (device) => {
   const next = String(device || '').trim().toLowerCase()
   if (!['cpu', 'cuda'].includes(next) || voiceDeviceBusy.value || voiceDeviceLocked.value) return
@@ -1555,7 +1563,7 @@ const setVoiceDevice = async (device) => {
   }
 }
 
-const copyMcpText = async (key, text) => {
+const copyKeyValue = async (key, text) => {
   if (!process.client || typeof window === 'undefined') return
   const value = String(text || '').trim()
   if (!value) return
@@ -1573,10 +1581,10 @@ const copyMcpText = async (key, text) => {
       document.execCommand('copy')
       document.body.removeChild(el)
     }
-    mcpCopiedKey.value = key
-    if (mcpCopiedTimer) clearTimeout(mcpCopiedTimer)
-    mcpCopiedTimer = setTimeout(() => {
-      if (mcpCopiedKey.value === key) mcpCopiedKey.value = ''
+    copiedKey.value = key
+    if (copiedKeyTimer) clearTimeout(copiedKeyTimer)
+    copiedKeyTimer = setTimeout(() => {
+      if (copiedKey.value === key) copiedKey.value = ''
     }, 1600)
   } catch {}
 }
@@ -1608,130 +1616,6 @@ const refreshSavedKeys = async () => {
 const onKeysAccountChange = async (event) => {
   keysAccount.value = String(event?.target?.value || '').trim()
   await refreshSavedKeys()
-}
-
-const refreshMcpLanAccess = async () => {
-  if (!process.client || typeof window === 'undefined') return
-  mcpLanAccessLoading.value = true
-  mcpLanAccessError.value = ''
-  try {
-    if (window.wechatDesktop?.getMcpLanAccess) {
-      const resp = await window.wechatDesktop.getMcpLanAccess()
-      mcpLanAccessEnabled.value = !!resp?.enabled
-      applyMcpAccessInfo(resp)
-      return
-    }
-    const resp = await fetchAdminEndpoint('/admin/mcp-access')
-    mcpLanAccessEnabled.value = !!resp?.enabled
-    applyMcpAccessInfo(resp)
-  } catch (e) {
-    mcpLanAccessError.value = e?.message || '读取 MCP 接入状态失败'
-  } finally {
-    mcpLanAccessLoading.value = false
-  }
-}
-
-const refreshMcpToken = async () => {
-  if (!process.client || typeof window === 'undefined') return
-  mcpTokenLoading.value = true
-  mcpTokenError.value = ''
-  try {
-    const resp = await fetchAdminEndpoint('/admin/mcp-token')
-    const token = String(resp?.token || '').trim()
-    if (!token) throw new Error('MCP token is empty')
-    mcpToken.value = token
-  } catch (e) {
-    mcpTokenError.value = e?.message || '读取 MCP Token 失败'
-  } finally {
-    mcpTokenLoading.value = false
-  }
-}
-
-const resetMcpToken = async () => {
-  if (!process.client || typeof window === 'undefined') return
-  mcpTokenLoading.value = true
-  mcpTokenError.value = ''
-  try {
-    const resp = await fetchAdminEndpoint('/admin/mcp-token/reset', { method: 'POST' })
-    const token = String(resp?.token || '').trim()
-    if (!token) throw new Error('MCP token is empty')
-    mcpToken.value = token
-    mcpCopiedKey.value = 'token-reset'
-    if (mcpCopiedTimer) clearTimeout(mcpCopiedTimer)
-    mcpCopiedTimer = setTimeout(() => {
-      if (mcpCopiedKey.value === 'token-reset') mcpCopiedKey.value = ''
-    }, 1600)
-    await refreshMcpSkillBundle()
-  } catch (e) {
-    mcpTokenError.value = e?.message || '重置 MCP Token 失败'
-  } finally {
-    mcpTokenLoading.value = false
-  }
-}
-
-const refreshMcpSkillBundle = async () => {
-  if (!process.client || typeof window === 'undefined') return
-  mcpSkillBundleLoading.value = true
-  mcpSkillBundleError.value = ''
-  try {
-    if (!mcpToken.value) await refreshMcpToken()
-    const resp = await $fetch('/mcp/skill/bundle', {
-      baseURL: mcpEndpoint.value.replace(/\/mcp$/, ''),
-      headers: mcpToken.value ? { Authorization: `Bearer ${mcpToken.value}` } : {},
-    })
-    const bundleText = String(resp?.bundleText || '').trim()
-    if (!bundleText) throw new Error('Skill bundle is empty')
-    mcpSkillBundleText.value = bundleText
-  } catch (e) {
-    mcpSkillBundleError.value = e?.message || '读取 skill 失败，当前显示内置精简版'
-    if (!mcpSkillBundleText.value) mcpSkillBundleText.value = ''
-  } finally {
-    mcpSkillBundleLoading.value = false
-  }
-}
-
-const setMcpLanAccess = async (enabled) => {
-  if (!process.client || typeof window === 'undefined') return
-  mcpLanAccessLoading.value = true
-  mcpLanAccessError.value = ''
-  mcpLanAccessMessage.value = ''
-  const previous = mcpLanAccessEnabled.value
-  mcpLanAccessEnabled.value = !!enabled
-  try {
-    if (window.wechatDesktop?.setMcpLanAccess) {
-      const resp = await window.wechatDesktop.setMcpLanAccess(!!enabled)
-      mcpLanAccessEnabled.value = !!resp?.enabled
-      applyMcpAccessInfo(resp)
-      mcpLanAccessMessage.value = resp?.changed ? 'MCP 局域网接入已更新，后端已重启。' : 'MCP 局域网接入状态未变化。'
-      await refreshMcpSkillBundle()
-      return
-    }
-
-    const resp = await fetchAdminEndpoint('/admin/mcp-access', {
-      method: 'POST',
-      body: { enabled: !!enabled },
-    })
-    mcpLanAccessEnabled.value = !!resp?.enabled
-    applyMcpAccessInfo(resp)
-    mcpLanAccessMessage.value = resp?.changed ? 'MCP 局域网接入已更新，正在等待后端重启。' : 'MCP 局域网接入状态未变化。'
-    if (resp?.changed) {
-      await waitForBackendHealth(30_000)
-      await refreshMcpLanAccess()
-      mcpLanAccessMessage.value = 'MCP 局域网接入已更新，后端已恢复。'
-    }
-    await refreshMcpSkillBundle()
-  } catch (e) {
-    mcpLanAccessEnabled.value = previous
-    mcpLanAccessError.value = e?.message || '设置 MCP 接入状态失败'
-    await refreshMcpLanAccess()
-  } finally {
-    mcpLanAccessLoading.value = false
-  }
-}
-
-const toggleMcpLanAccess = async () => {
-  if (mcpLanAccessLoading.value) return
-  await setMcpLanAccess(!mcpLanAccessEnabled.value)
 }
 
 const refreshDesktopAutoLaunch = async () => {
@@ -2074,8 +1958,6 @@ const loadCdnImageStatus = async () => {
   try {
     const res = await api.getCdnImageStatus()
     cdnImageEnabled.value = res?.enabled === true
-    const limit = Number(res?.dailyLimit)
-    if (Number.isFinite(limit) && limit > 0) cdnImageDailyLimit.value = limit
   } catch {
     // 读取失败保持默认关闭
   }
@@ -2112,8 +1994,6 @@ const refreshSettingsDialogData = async () => {
   const tasks = [
     refreshDesktopBackendPort(),
     refreshVoiceTranscriptionStatus(),
-    refreshMcpLanAccess(),
-    refreshMcpToken(),
     refreshBackendLogFileInfo(),
     refreshSavedKeys(),
   ]
@@ -2129,8 +2009,6 @@ const refreshSettingsDialogData = async () => {
 
   await Promise.allSettled(tasks)
 
-  // skill bundle 依赖 token / access host；先让弹窗可交互，再后台补齐这块文本。
-  void refreshMcpSkillBundle()
 }
 
 watch(() => props.open, async (isOpen) => {
@@ -2162,7 +2040,7 @@ onMounted(async () => {
     }
   }
 
-  desktopDefaultToChatWhenData.value = readLocalBoolSetting(DESKTOP_SETTING_DEFAULT_TO_CHAT_KEY, false)
+  desktopDefaultToChatWhenData.value = readLocalBoolSetting(DESKTOP_SETTING_DEFAULT_TO_CHAT_KEY, true)
   snsUseCache.value = readLocalBoolSetting(SNS_SETTING_USE_CACHE_KEY, true)
   void loadCdnImageStatus()
 
@@ -2175,9 +2053,9 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (!process.client || typeof window === 'undefined') return
   window.removeEventListener('keydown', onEscKeydown)
-  if (mcpCopiedTimer) {
-    clearTimeout(mcpCopiedTimer)
-    mcpCopiedTimer = null
+  if (copiedKeyTimer) {
+    clearTimeout(copiedKeyTimer)
+    copiedKeyTimer = null
   }
   clearVoiceModelDownloadPolling()
   if (typeof removeDesktopOutputDirProgressListener === 'function') {

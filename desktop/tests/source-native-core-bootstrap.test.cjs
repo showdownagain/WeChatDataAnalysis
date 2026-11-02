@@ -14,6 +14,7 @@ const {
   applySourceRuntimeEnvironment,
   ensureSourceNativeCore,
   publicReleaseUrl,
+  validatePin,
   validateSourceRuntimeDirectory,
 } = require("../src/source-native-core-bootstrap.cjs");
 const { resolveNativeCoreRuntimeDir } = require("../src/native-core-path.cjs");
@@ -23,17 +24,6 @@ const BUILD_ISSUED_AT_UNIX = NOW_UNIX - 60;
 const BUILD_EXPIRES_AT_UNIX = BUILD_ISSUED_AT_UNIX + 45 * 24 * 60 * 60;
 const RUNTIME_EXPIRES_AT_UNIX = NOW_UNIX + 30 * 24 * 60 * 60;
 const ARCHIVE_CONTENT = Buffer.from("fixture-public-release-archive", "utf8");
-const TRACKED_PIN = Object.freeze({
-  schemaVersion: 2,
-  platform: "darwin",
-  architecture: "arm64",
-  publisherRepository: "LifeArchiveProject/WeChatDataAnalysis",
-  releaseTag: "macos-source-runtime-20260809-71122b5b-8e355001",
-  assetName: "wechatdataanalysis-macos-source-runtime-arm64-v1.tar.gz",
-  assetSha256: "6b3f55102cee5e3a3337ae45e4d51f4b7445df3a55258a314b7f727d0e582484",
-  runtimeManifestSha256: "8d183314db3253b5e4d317bfc61657cb0bb06b28630661619e3beda86e0abbd2",
-  expiresAtUnix: 1790059708,
-});
 
 const SOURCE_PUBLIC_CORE_MANIFEST = Object.freeze({
   schemaVersion: 3,
@@ -235,17 +225,18 @@ function withTempRoot(callback) {
 }
 
 test("tracked macOS source pin selects the exact public WCDA Release asset", () => {
-  const tracked = JSON.parse(
-    fs.readFileSync(
-      path.join(__dirname, "..", "resources", "native-core-source-macos.json"),
-      "utf8"
+  const tracked = validatePin(
+    JSON.parse(
+      fs.readFileSync(
+        path.join(__dirname, "..", "resources", "native-core-source-macos.json"),
+        "utf8"
+      )
     )
   );
-  assert.deepEqual(tracked, TRACKED_PIN);
   assert.equal(
     publicReleaseUrl(tracked),
     "https://github.com/LifeArchiveProject/WeChatDataAnalysis/releases/download/" +
-      "macos-source-runtime-20260809-71122b5b-8e355001/" +
+      `${encodeURIComponent(tracked.releaseTag)}/` +
       "wechatdataanalysis-macos-source-runtime-arm64-v1.tar.gz"
   );
 });

@@ -44,6 +44,7 @@ const {
   shouldRetryBackendOnDifferentPort,
 } = require("./backend-startup.cjs");
 const { applyNativeCoreRuntimePolicy } = require("./native-core-runtime.cjs");
+const { loadWithRedirect, resolveDesktopUiUrl } = require("./renderer-startup.cjs");
 const {
   ENV_INTEGRITY_NATIVE_PATH,
   ENV_MACOS_DB_KEY_BUNDLE,
@@ -54,7 +55,7 @@ const {
 const { resolveNativeCoreRuntimeDir } = require("./native-core-path.cjs");
 const {
   configurePrivatePkiUpdateVerification,
-  ensurePrivatePkiIssuerCached,
+  resolvePrivatePkiRuntime,
 } = require("./windows-private-pki-runtime.cjs");
 const { ensureMacosPrivatePkiTrust } = require("./macos-private-pki-runtime.cjs");
 
@@ -145,8 +146,7 @@ function getBackendBindHost() {
   const envHost = String(process.env.WECHAT_TOOL_HOST || "").trim();
   if (envHost === LAN_BACKEND_HOST || envHost === "::") return LAN_BACKEND_HOST;
   if (envHost === DEFAULT_BACKEND_HOST || envHost === "localhost" || envHost === "::1") return DEFAULT_BACKEND_HOST;
-  if (!app.isPackaged) return DEFAULT_BACKEND_HOST;
-  return loadDesktopSettings()?.mcpLanAccessEnabled ? LAN_BACKEND_HOST : DEFAULT_BACKEND_HOST;
+  return DEFAULT_BACKEND_HOST;
 }
 
 function getBackendAccessHost() {
@@ -154,84 +154,6 @@ function getBackendAccessHost() {
   const host = String(getBackendBindHost() || "").trim();
   if (host === "0.0.0.0" || host === "::") return "127.0.0.1";
   return host || "127.0.0.1";
-}
-
-function getInterfacePenalty(name) {
-  const lower = String(name || "").toLowerCase();
-  if (/(docker|hyper-v|loopback|npcap|tailscale|virtual|virtualbox|vmware|vethernet|wsl|zerotier)/i.test(lower)) {
-    return 30;
-  }
-  if (/(ethernet|wi-fi|wifi|wireless|wlan|以太|无线)/i.test(lower)) {
-    return 0;
-  }
-  return 10;
-}
-
-function isReachableClientIpv4(address) {
-  const text = String(address || "").trim();
-  const parts = text.split(".");
-  if (parts.length !== 4) return false;
-  const nums = parts.map((part) => Number(part));
-  if (!nums.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) return false;
-  if (nums[0] === 0 || nums[0] === 127 || nums[0] >= 224) return false;
-  if (nums[0] === 169 && nums[1] === 254) return false;
-  return true;
-}
-
-function isPrivateIpv4(address) {
-  const nums = String(address || "").trim().split(".").map((part) => Number(part));
-  if (nums.length !== 4 || !nums.every((n) => Number.isInteger(n))) return false;
-  return (
-    nums[0] === 10 ||
-    (nums[0] === 172 && nums[1] >= 16 && nums[1] <= 31) ||
-    (nums[0] === 192 && nums[1] === 168)
-  );
-}
-
-function getLanAccessHost(defaultHost = DEFAULT_BACKEND_HOST) {
-  const candidates = [];
-  const seen = new Set();
-  const addCandidate = (address, interfaceName = "", sourceOrder = 0) => {
-    const value = String(address || "").trim();
-    if (!isReachableClientIpv4(value) || seen.has(value)) return;
-    seen.add(value);
-    candidates.push([
-      isPrivateIpv4(value) ? 0 : 1,
-      getInterfacePenalty(interfaceName),
-      sourceOrder,
-      value,
-    ]);
-  };
-
-  try {
-    const interfaces = os.networkInterfaces();
-    for (const [name, addresses] of Object.entries(interfaces || {})) {
-      for (const item of addresses || []) {
-        if (!item || (item.family !== "IPv4" && item.family !== 4) || item.internal) continue;
-        addCandidate(item.address, name, 0);
-      }
-    }
-  } catch {}
-
-  candidates.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
-  return candidates[0]?.[3] || defaultHost;
-}
-
-function getMcpAccessHost(bindHost = getBackendBindHost()) {
-  const host = String(bindHost || "").trim();
-  if (host === LAN_BACKEND_HOST || host === "::") return getLanAccessHost(DEFAULT_BACKEND_HOST);
-  return host || DEFAULT_BACKEND_HOST;
-}
-
-function getMcpAccessInfo(bindHost = getBackendBindHost(), port = getBackendPort()) {
-  const accessHost = getMcpAccessHost(bindHost);
-  const origin = `http://${formatHostForUrl(accessHost)}:${port}`;
-  return {
-    accessHost,
-    mcpEndpoint: `${origin}/mcp`,
-    skillBundleUrl: `${origin}/mcp/skill/bundle`,
-    skillMarkdownUrl: `${origin}/mcp/skill`,
-  };
 }
 
 function getBackendPort() {
@@ -254,18 +176,6 @@ function setBackendPortSetting(nextPort) {
   return p;
 }
 
-function getMcpLanAccessEnabled() {
-  return getBackendBindHost() === LAN_BACKEND_HOST;
-}
-
-function setMcpLanAccessSetting(enabled) {
-  loadDesktopSettings();
-  desktopSettings.mcpLanAccessEnabled = !!enabled;
-  persistDesktopSettings();
-  process.env.WECHAT_TOOL_HOST = desktopSettings.mcpLanAccessEnabled ? LAN_BACKEND_HOST : DEFAULT_BACKEND_HOST;
-  return desktopSettings.mcpLanAccessEnabled;
-}
-
 function getBackendHealthUrl() {
   const host = formatHostForUrl(getBackendAccessHost());
   const port = getBackendPort();
@@ -286,9 +196,12 @@ function getBackendUiUrl() {
 }
 
 function getDesktopUiUrl() {
-  const explicit = String(process.env.ELECTRON_START_URL || "").trim();
-  if (explicit) return explicit;
-  return app.isPackaged ? getBackendUiUrl() : "http://localhost:3000";
+  return resolveDesktopUiUrl({
+    startUrl: process.env.ELECTRON_START_URL,
+    backendUrl: getBackendUiUrl(),
+    isPackaged: app.isPackaged,
+    staticUi: process.env.WECHAT_TOOL_STATIC_UI === "1",
+  });
 }
 
 function isPortAvailable(port, host) {
@@ -842,9 +755,12 @@ function getDesktopSettingsPath() {
 }
 
 function getPackagedUiDir() {
-  if (!app.isPackaged) return null;
+  // 静态开发入口也加载生成文件，重建后必须失效旧页面缓存。
+  if (!app.isPackaged && process.env.WECHAT_TOOL_STATIC_UI !== "1") return null;
   try {
-    return path.join(process.resourcesPath, "ui");
+    return process.env.WECHAT_TOOL_UI_DIR?.trim() || (app.isPackaged
+      ? path.join(process.resourcesPath, "ui")
+      : path.join(__dirname, "..", "..", "frontend", ".output", "public"));
   } catch {
     return null;
   }
@@ -880,8 +796,6 @@ function loadDesktopSettings() {
     ignoredUpdateVersion: "",
     // Backend (FastAPI) listens on this port. Used in packaged builds.
     backendPort: DEFAULT_BACKEND_PORT,
-    // When enabled, the backend binds to 0.0.0.0 so phone clients can reach /mcp.
-    mcpLanAccessEnabled: false,
     // Custom output dir; empty string means use the default dataDir/output.
     outputDir: "",
     // Pending output dir written before migration so interrupted transactions can resume.
@@ -908,7 +822,6 @@ function loadDesktopSettings() {
     const parsed = parseDesktopSettingsText(raw);
     desktopSettings = { ...defaults, ...(parsed && typeof parsed === "object" ? parsed : {}) };
     desktopSettings.backendPort = parsePort(desktopSettings.backendPort) ?? defaults.backendPort;
-    desktopSettings.mcpLanAccessEnabled = !!desktopSettings.mcpLanAccessEnabled;
     desktopSettings.outputDir = safeNormalizeDirectory(desktopSettings.outputDir || "");
     desktopSettings.pendingOutputDir =
       parsed && typeof parsed === "object" && Object.prototype.hasOwnProperty.call(parsed, "pendingOutputDir")
@@ -1282,7 +1195,7 @@ async function applyPendingOutputDirOnStartup() {
 }
 
 async function refreshRendererCacheForPackagedUi() {
-  if (!app.isPackaged) return;
+  if (!app.isPackaged && process.env.WECHAT_TOOL_STATIC_UI !== "1") return;
 
   const nextBuildId = readPackagedUiBuildId();
   if (!nextBuildId) return;
@@ -1301,6 +1214,7 @@ async function refreshRendererCacheForPackagedUi() {
     logMain(`[main] cleared renderer cache for UI build change: ${prevBuildId || "(none)"} -> ${nextBuildId}`);
   } catch (err) {
     logMain(`[main] failed to clear renderer cache for UI build change: ${err?.message || err}`);
+    return;
   }
 
   loadDesktopSettings();
@@ -2113,10 +2027,17 @@ function startBackend() {
     WECHAT_TOOL_PORT: String(getBackendPort()),
     WECHAT_TOOL_DATA_DIR: resolvedDataPath,
     WECHAT_TOOL_OUTPUT_DIR: resolvedOutputPath,
+    // The packaged backend cannot rely on Finder/Explorer inheriting a shell PATH.
+    // Reuse this exact Electron executable as Node only for the SNS WASM child.
+    WECHAT_TOOL_NODE_EXECUTABLE: process.execPath,
+    WECHAT_TOOL_NODE_MODE: "electron-run-as-node",
     // Electron decodes the backend pipe as UTF-8. Do not inherit an ambient
     // Windows code page such as cp950, which cannot encode Simplified Chinese.
     PYTHONIOENCODING: "utf-8",
   };
+  // Never turn the backend (or the Electron main process) globally into Node.
+  // Python scopes this flag to the single WASM helper subprocess.
+  delete env.ELECTRON_RUN_AS_NODE;
   configureNativeCoreRuntime(env);
   clearLegacyWcdbEnvironment(env);
   logMain(
@@ -2156,7 +2077,9 @@ function startBackend() {
     // The desktop backend only needs runtime dependencies. Letting `uv run`
     // include the default dev group can block Electron startup on an unrelated
     // pytest/Pygments download before Python is even launched.
-    backendProc = spawn("uv", ["run", "--no-dev", "main.py"], {
+    const voiceExtras = ["--extra", "voice-transcription"];
+    if (env.WECHAT_TOOL_QWEN_GPU === "1") voiceExtras.push("--extra", "voice-transcription-gpu");
+    backendProc = spawn("uv", ["run", "--no-dev", ...voiceExtras, "main.py"], {
       cwd: repoRoot(),
       env,
       stdio: "inherit",
@@ -2432,6 +2355,8 @@ function setupRendererLifecycleLogging(win) {
   const logRendererLifecycle = (message) => {
     logMain(`[renderer] ${message}`);
   };
+  win.on('show', () => logRendererLifecycle('window-show'));
+  win.on('hide', () => logRendererLifecycle('window-hide'));
 
   logRendererLifecycle(`window-created id=${win.id}`);
 
@@ -2540,14 +2465,15 @@ async function loadWithRetry(win, url) {
     attempt += 1;
     logMain(`[main] loadWithRetry attempt=${attempt} url=${url}`);
     try {
-      await win.loadURL(url);
+      const remaining = Math.max(1, 60_000 - (Date.now() - startedAt));
+      await loadWithRedirect(win, url, Math.min(5000, remaining), remaining);
       logMain(`[main] loadWithRetry success attempt=${attempt} elapsedMs=${Date.now() - startedAt} url=${url}`);
       return;
     } catch (err) {
       logMain(
         `[main] loadWithRetry failure attempt=${attempt} elapsedMs=${Date.now() - startedAt} url=${url} error=${err?.message || err}`
       );
-      if (Date.now() - startedAt > 60_000) throw new Error(`Failed to load URL in time: ${url}`);
+      if (Date.now() - startedAt >= 60_000) throw new Error(`Failed to load URL in time: ${url}`);
       await new Promise((r) => setTimeout(r, 500));
     }
   }
@@ -2930,82 +2856,6 @@ function registerWindowIpc() {
       }, 50);
 
       return { success: true, changed: true, port: nextPort, uiUrl };
-    } finally {
-      backendPortChangeInProgress = false;
-    }
-  });
-
-  ipcMain.handle("backend:getMcpLanAccess", () => {
-    try {
-      const host = getBackendBindHost();
-      const port = getBackendPort();
-      return {
-        enabled: getMcpLanAccessEnabled(),
-        host,
-        port,
-        uiUrl: getDesktopUiUrl(),
-        ...getMcpAccessInfo(host, port),
-      };
-    } catch (err) {
-      logMain(`[main] backend:getMcpLanAccess failed: ${err?.message || err}`);
-      const port = DEFAULT_BACKEND_PORT;
-      return {
-        enabled: false,
-        host: DEFAULT_BACKEND_HOST,
-        port,
-        uiUrl: getDesktopUiUrl(),
-        ...getMcpAccessInfo(DEFAULT_BACKEND_HOST, port),
-      };
-    }
-  });
-
-  ipcMain.handle("backend:setMcpLanAccess", async (_event, enabled) => {
-    if (backendPortChangeInProgress) throw new Error("后端切换中，请稍后重试");
-    if (outputDirChangeInProgress || accountDataChangeInProgress) {
-      throw new Error("后端维护中，请稍后重试");
-    }
-
-    const nextEnabled = !!enabled;
-    const prevEnabled = getMcpLanAccessEnabled();
-    if (nextEnabled === prevEnabled) {
-      const host = getBackendBindHost();
-      const port = getBackendPort();
-      return {
-        success: true,
-        changed: false,
-        enabled: prevEnabled,
-        host,
-        port,
-        uiUrl: getDesktopUiUrl(),
-        ...getMcpAccessInfo(host, port),
-      };
-    }
-
-    backendPortChangeInProgress = true;
-    try {
-      setMcpLanAccessSetting(nextEnabled);
-      try {
-        await restartBackend();
-      } catch (err) {
-        setMcpLanAccessSetting(prevEnabled);
-        try {
-          await restartBackend();
-        } catch {}
-        throw err;
-      }
-
-      const uiUrl = getDesktopUiUrl();
-      logMain(`[main] MCP access changed enabled=${nextEnabled}; backend restarted without UI reload`);
-
-      return {
-        success: true,
-        changed: true,
-        enabled: nextEnabled,
-        host: getBackendBindHost(),
-        port: getBackendPort(),
-        uiUrl,
-        ...getMcpAccessInfo(),
-      };
     } finally {
       backendPortChangeInProgress = false;
     }
@@ -3417,9 +3267,14 @@ async function ensureMainWindowReady() {
     logMain(`[main] debugEnabled=${debugEnabled()} startUrl=${startUrl}`);
     await loadWithRetry(win, startUrl);
 
-    if (debugEnabled()) {
+    // 首次创建不能只依赖构造器的显示行为；隐藏启动标志可能留下不可见主窗口。
+    if (mainWindow === win && !win.isDestroyed()) showMainWindow();
+
+    // 常规开发版启动也先显示应用；仅显式调试启动自动打开工具窗口。
+    if (debugEnabled() && (process.env.WECHAT_DESKTOP_DEBUG === "1" || process.argv.includes("--debug") || process.argv.includes("--devtools"))) {
       try {
-        win.webContents.openDevTools({ mode: "detach" });
+        // 调试窗口不抢走主窗口焦点，启动后用户能直接看到应用。
+        win.webContents.openDevTools({ mode: "detach", activate: false });
       } catch {}
     }
 
@@ -3436,12 +3291,7 @@ async function ensureMainWindowReady() {
 async function main() {
   await app.whenReady();
   if (app.isPackaged && process.platform === "win32") {
-    const evidence = ensurePrivatePkiIssuerCached({
-      resourcesPath: process.resourcesPath,
-    });
-    logMain(
-      `[private-pki] issuer=${evidence.issuerStore} root=${evidence.rootSha256.slice(0, 12)} newlyAdded=${evidence.newlyAdded === true}`
-    );
+    resolvePrivatePkiRuntime(process.resourcesPath);
   }
   if (app.isPackaged && process.platform === "darwin") {
     const evidence = ensureMacosPrivatePkiTrust({

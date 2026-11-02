@@ -1026,6 +1026,16 @@
         </div>
       </transition>
     
+      <details v-if="databaseFailures.length" class="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <summary class="cursor-pointer text-sm font-semibold text-amber-800">数据库解密详情（{{ databaseFailures.length }} 个未完成）</summary>
+        <ul class="mt-3 space-y-2 text-sm text-amber-900">
+          <li v-for="item in databaseFailures" :key="item.id">
+            <strong>{{ item.name }}</strong>：{{ item.error }}
+            <span v-if="item.authenticated">（密钥认证已通过）</span>
+          </li>
+        </ul>
+      </details>
+
       <!-- 错误提示 -->
       <transition name="fade">
         <ErrorNotice v-if="error" :message="error" class="mt-6 animate-shake" />
@@ -1085,6 +1095,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useApi } from '~/composables/useApi'
 import { normalizeWechatInstallPath, readStoredWechatInstallPath } from '~/lib/wechat-install-path'
+import { followMacosCapture, macosCaptureProgressMessage } from '~/lib/macos-capture-progress'
 
 const {
   decryptDatabase,
@@ -1116,7 +1127,7 @@ const {
 const loading = ref(false)
 const error = ref('')
 const warning = ref('') // 警告，用于密钥提示
-const warningIsError = computed(() => /失败|错误|异常|中断/.test(String(warning.value || '')))
+const warningIsError = computed(() => !String(warning.value || '').startsWith('解密部分成功：') && /失败|错误|异常|中断/.test(String(warning.value || '')))
 const currentStep = ref(0)
 const mediaAccount = ref('')
 const activeKeyAccount = ref('')
@@ -1143,7 +1154,7 @@ const imageKeyMemoryScanNote = computed(() => String(
   || platformCapabilities.value?.image_key_memory_scan_note
   || '图片密钥扫描原生资源缺失或安装不完整，请重新安装完整发行包。'
 ))
-const DB_KEY_PERSISTENCE_WARNING = '数据库密钥未通过完整实时库校验或无法安全保存；请重新获取并确认主要数据库解密成功，仍失败请检查数据目录权限。'
+const DB_KEY_PERSISTENCE_WARNING = '数据库密钥未通过 session/message 跨库认证或保存失败；请查看失败详情，确认账号密钥及数据目录写入权限。'
 const guideDialog = reactive({
   open: false,
   eyebrow: '操作提示',
@@ -2011,8 +2022,15 @@ const cancelDbKeyAcquisition = () => {
 }
 
 const showDbKeyPersistenceWarning = (result) => {
+  if (result?.failure_count > 0 && result?.success_count > 0) {
+    warning.value = `解密部分成功：${result.success_count}/${result.total_databases} 个数据库可用；失败文件请查看解密详情，已成功的数据可继续使用。`
+  }
+  const repaired = Object.values(result?.account_results || {}).flatMap(account =>
+    Object.values(account.db_diagnostics || {}).filter(db => db.success && db.index_repair?.success).map(db => db.db_name)
+  )
+  if (repaired.length) warning.value = [warning.value, `已在解密输出副本中重建索引并通过完整性检查：${repaired.join('、')}。`].filter(Boolean).join(' ')
   if (result?.db_key_persisted !== false) return
-  warning.value = DB_KEY_PERSISTENCE_WARNING
+  warning.value = [warning.value, DB_KEY_PERSISTENCE_WARNING].filter(Boolean).join(" ")
   logDecryptDebug('decrypt:db-key-persistence-warning', {
     error_count: Array.isArray(result?.db_key_persistence_errors)
       ? result.db_key_persistence_errors.length
@@ -2097,14 +2115,16 @@ const runMacosLldbFallback = async ({ requestRevision, requestController, helper
     return false
   }
 
+  const captureTransactionId = String(response?.data?.transaction_id || '')
   const loggedOut = await requestGuideDialog({
     eyebrow: '步骤 2 / 3',
     title: '请在临时微信中退出当前账号',
-    description: '退出到二维码登录界面后不要重新扫码；回到这里点击开始监测，再用手机确认登录。',
+    description: '退出到二维码登录界面后不要重新扫码；点击开始监测并完成管理员授权，等页面明确显示“监测已就绪”后再登录。',
     details: [
       '必须使用微信菜单中的“退出登录”，不要关闭微信窗口',
       '看到二维码后先回到 WCDA 点击“开始监测”',
-      '监测启动后再扫码或在手机上确认同一账号登录'
+      '监测已就绪后再扫码或在手机上确认同一账号登录',
+      '捕获后临时微信窗口会关闭，随后恢复腾讯原签名微信；不要再次登录'
     ],
     note: '捕获只针对这次重新登录计算，并使用所选账号数据库实时校验结果。',
     primaryLabel: '已看到二维码，开始监测',
@@ -2117,38 +2137,25 @@ const runMacosLldbFallback = async ({ requestRevision, requestController, helper
   }
 
   warning.value = '正在等待管理员授权并启动本机监测；显示“监测已就绪”前请不要登录微信。'
-  const captureOutcomePromise = captureMacosKey({
-    ...macosKeyCapturePayload(),
-    signal: requestController.signal
-  }).then(
-    captureResponse => ({ response: captureResponse, captureError: null }),
-    captureError => ({ response: null, captureError })
-  )
-  let captureOutcome = null
-  let monitorReady = false
-  while (isDbKeyRequestActive(requestRevision, requestController) && !captureOutcome && !monitorReady) {
-    captureOutcome = await Promise.race([
-      captureOutcomePromise,
-      waitForDbKeyDelay(350, requestController.signal).then(() => null)
-    ])
-    if (captureOutcome) break
-    try {
-      const statusResponse = await getMacosKeyCaptureStatus({ signal: requestController.signal })
-      monitorReady = statusResponse?.status === 0 && statusResponse?.data?.monitor_ready === true
-    } catch (statusError) {
-      if (statusError?.name === 'AbortError') throw statusError
+  response = await followMacosCapture({
+    transactionId: captureTransactionId,
+    isActive: () => isDbKeyRequestActive(requestRevision, requestController),
+    start: () => captureMacosKey({
+      ...macosKeyCapturePayload(),
+      signal: requestController.signal
+    }),
+    getStatus: async ({ signal }) => {
+      const statusResponse = await getMacosKeyCaptureStatus({ signal })
+      return statusResponse?.status === 0 ? statusResponse.data : null
+    },
+    onProgress: (ready, phase) => {
+      warning.value = macosCaptureProgressMessage(ready, phase)
     }
-  }
+  })
   if (!isDbKeyRequestActive(requestRevision, requestController)) {
     await cleanupMacosKeyCapture({ silent: true })
     return false
   }
-  if (monitorReady) {
-    warning.value = '监测已就绪：现在请扫码或在手机上确认登录，完成前不要关闭微信或 WCDA。'
-  }
-  if (!captureOutcome) captureOutcome = await captureOutcomePromise
-  if (captureOutcome.captureError) throw captureOutcome.captureError
-  response = captureOutcome.response
   macosKeyCapturePrepared.value = response?.data?.needs_cleanup === true
   macosKeyCaptureOwnedByPage.value = macosKeyCapturePrepared.value
   const key = String(response?.data?.db_key || '').trim().toLowerCase()
@@ -2535,6 +2542,12 @@ const getMediaDecryptConcurrency = () => {
 
 // 解密结果存储
 const decryptResult = ref(null)
+const databaseFailures = computed(() => Object.entries(decryptResult.value?.account_results || {}).flatMap(([account, result]) =>
+  Object.entries(result.db_diagnostics || {}).filter(([, db]) => db.success === false).map(([name, db]) => ({
+    id: `${account}/${name}`, name, authenticated: db.key_authenticated === true,
+    error: db.error === 'key_mismatch' ? '密钥与此数据库不匹配' : (db.error || '数据库完整性检查未通过')
+  }))
+))
 
 // 验证表单
 const validateForm = () => {
@@ -2667,6 +2680,7 @@ const handleDecrypt = async () => {
     db_key_length: String(formData.key || '').trim().length
   })
   loading.value = true
+  decryptResult.value = null
   error.value = ''
   warning.value = ''
 

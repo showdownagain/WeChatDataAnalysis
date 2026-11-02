@@ -307,7 +307,7 @@ export const createChatHistoryRecordNormalizer = ({ apiBase, getSelectedAccount,
       })()
       if (fileId) {
         previewCandidates.push(
-          `${apiBase}/chat/media/image?account=${account}&file_id=${encodeURIComponent(fileId)}&username=${username}`
+          `${apiBase}/chat/media/image?account=${account}&file_id=${encodeURIComponent(fileId)}&username=${username}&v=local-quality-1`
         )
       }
 
@@ -320,7 +320,7 @@ export const createChatHistoryRecordNormalizer = ({ apiBase, getSelectedAccount,
           srcServerId ? `server_id=${encodeURIComponent(srcServerId)}` : '',
           `username=${username}`
         ].filter(Boolean)
-        previewCandidates.push(`${apiBase}/chat/media/image?${previewParts.join('&')}`)
+        previewCandidates.push(`${apiBase}/chat/media/image?${previewParts.join('&')}&v=local-quality-1`)
       }
 
       output._linkPreviewCandidates = previewCandidates
@@ -347,10 +347,15 @@ export const createChatHistoryRecordNormalizer = ({ apiBase, getSelectedAccount,
       const recordIndex = Number.isFinite(Number(output.recordIndex)) ? String(Number(output.recordIndex)) : ''
       const recordIndexPath = normalizeChatHistoryRecordIndexPath(output.recordIndexPath)
       const recordAttachKey = String(output.recordAttachKey || '').trim()
+      const hasRecordVideoLookup = Boolean(
+        recordAttachKey
+        && Number(dataSize) > 0
+        && (recordIndexPath || recordIndex)
+      )
       const makeVideoMediaUrl = (endpoint, candidateMd5, includeDataSize = false) => {
         const parts = [
           `account=${account}`,
-          `md5=${encodeURIComponent(candidateMd5)}`,
+          candidateMd5 ? `md5=${encodeURIComponent(candidateMd5)}` : '',
           srcServerId ? `server_id=${encodeURIComponent(srcServerId)}` : '',
           srcLocalId ? `src_local_id=${encodeURIComponent(srcLocalId)}` : '',
           srcCreateTime ? `src_create_time=${encodeURIComponent(srcCreateTime)}` : '',
@@ -367,13 +372,16 @@ export const createChatHistoryRecordNormalizer = ({ apiBase, getSelectedAccount,
         thumbCandidates.push(makeVideoMediaUrl('video_thumb', output.videoMd5, true))
       }
       if (output.videoThumbMd5 && output.videoThumbMd5 !== output.videoMd5) {
-        thumbCandidates.push(makeVideoMediaUrl('video_thumb', output.videoThumbMd5, false))
+        thumbCandidates.push(makeVideoMediaUrl('video_thumb', output.videoThumbMd5, true))
+      }
+      if (!thumbCandidates.length && hasRecordVideoLookup) {
+        thumbCandidates.push(makeVideoMediaUrl('video_thumb', '', true))
       }
       output._videoThumbCandidates = thumbCandidates
       output._videoThumbCandidateIndex = 0
       output._videoThumbError = false
       output.videoThumbUrl = thumbCandidates[0] || ''
-      output.videoUrl = output.videoMd5
+      output.videoUrl = output.videoMd5 || hasRecordVideoLookup
         ? makeVideoMediaUrl('video', output.videoMd5, true)
         : ''
       if (!output.content || /^\[.+\]$/.test(String(output.content || '').trim())) output.content = '[视频]'
@@ -416,7 +424,7 @@ export const createChatHistoryRecordNormalizer = ({ apiBase, getSelectedAccount,
         recordAttachKey ? `record_attach=${encodeURIComponent(recordAttachKey)}` : '',
         `username=${username}`
       ].filter(Boolean)
-      output.imageUrl = imageParts.length ? `${apiBase}/chat/media/image?${imageParts.join('&')}` : ''
+      output.imageUrl = imageParts.length ? `${apiBase}/chat/media/image?${imageParts.join('&')}&v=local-quality-1` : ''
       if (!output.content || /^\[.+\]$/.test(String(output.content || '').trim())) output.content = '[图片]'
     }
 

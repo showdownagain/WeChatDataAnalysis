@@ -5,7 +5,7 @@ import test from 'node:test'
 const useApiSource = await readFile(new URL('../composables/useApi.js', import.meta.url), 'utf8')
 const settingsSource = await readFile(new URL('../components/SettingsDialog.vue', import.meta.url), 'utf8')
 const voiceSectionStart = settingsSource.indexOf('<section ref="voiceSectionRef">')
-const voiceSectionEnd = settingsSource.indexOf('<section ref="mcpSectionRef">', voiceSectionStart)
+const voiceSectionEnd = settingsSource.indexOf('<section ref="keysSectionRef">', voiceSectionStart)
 const voiceSectionSource = settingsSource.slice(voiceSectionStart, voiceSectionEnd)
 
 test('voice model API exposes selection, download polling, and deletion contracts', () => {
@@ -36,8 +36,8 @@ test('settings renders model cards and keeps active downloads observable', () =>
 
 test('download-time deletion stays available and supersedes stale download work', () => {
   assert.match(voiceSectionSource, /v-if="canDeleteVoiceModel\(model\)"/)
-  assert.match(voiceSectionSource, /:disabled="isVoiceModelDeletePending\(model\.id\)"/)
-  assert.match(voiceSectionSource, /v-if="!model\.downloaded && !isVoiceModelDeletePending\(model\.id\)"/)
+  assert.match(voiceSectionSource, /:disabled="isVoiceModelDeletePending\(model\.id\) \|\| qwenIsActive\(model\)"/)
+  assert.match(voiceSectionSource, /v-if="!model\.downloaded && !isVoiceModelDeletePending\(model\.id\) && !qwenNeedsPreparation\(model\)"/)
   assert.match(voiceSectionSource, /停止并删除/)
 
   const deleteButtonStart = voiceSectionSource.indexOf('v-if="canDeleteVoiceModel(model)"')
@@ -74,7 +74,7 @@ test('download-time deletion stays available and supersedes stale download work'
 
 test('settings shows inference device before the model catalog', () => {
   assert.ok(voiceSectionStart >= 0 && voiceSectionEnd > voiceSectionStart)
-  assert.ok(voiceSectionSource.indexOf('>推理设备<') < voiceSectionSource.indexOf('>Whisper 模型<'))
+  assert.ok(voiceSectionSource.indexOf('>推理设备<') < voiceSectionSource.indexOf('>语音识别模型<'))
 })
 
 test('settings keeps device and model selection feedback compact', () => {

@@ -10,6 +10,14 @@
 
     <ResourceSidebar :state="chatState" />
     <VoiceTranscriptionSidebar :state="chatState" />
+    <GroupMembersSidebar
+      v-if="groupMembersSidebarOpen && selectedContact?.isGroup"
+      :key="`${selectedAccount}:${selectedContact.username}`"
+      :account="selectedAccount"
+      :username="selectedContact.username"
+      :privacy-mode="privacyMode"
+      :state="chatState"
+    />
     <ChatOverlays :state="chatState" />
   </div>
 </template>
@@ -20,6 +28,7 @@ import { storeToRefs } from 'pinia'
 
 import ResourceSidebar from '~/components/chat/ResourceSidebar.vue'
 import VoiceTranscriptionSidebar from '~/components/chat/VoiceTranscriptionSidebar.vue'
+import GroupMembersSidebar from '~/components/chat/GroupMembersSidebar.vue'
 import { useApi } from '~/composables/useApi'
 import { createEmptySearchContext, useChatSearch } from '~/composables/chat/useChatSearch'
 import { useChatSessions } from '~/composables/chat/useChatSessions'
@@ -157,7 +166,9 @@ const {
   enabled: realtimeEnabled,
   toggleSeq: realtimeToggleSeq,
   lastToggleAction: realtimeLastToggleAction,
-  changeSeq: realtimeChangeSeq
+  changeSeq: realtimeChangeSeq,
+  messageEvent: realtimeMessageEvent,
+  messageEventSeq: realtimeMessageEventSeq
 } = storeToRefs(realtimeStore)
 
 const searchContext = ref(createEmptySearchContext())
@@ -232,6 +243,7 @@ const {
   loadMoreMessages,
   refreshSelectedMessages,
   refreshCurrentMessageMedia,
+  applyRealtimeMessage,
   queueRealtimeRefresh,
   resetMessageState,
   onAvatarError,
@@ -257,6 +269,37 @@ const {
   onContactCardMouseEnter,
   toggleReverseMessageSides
 } = messageState
+
+const groupAnnouncement = ref('')
+const groupAnnouncementOpen = ref(false)
+let groupAnnouncementRequestSeq = 0
+
+const loadGroupAnnouncement = async (username) => {
+  const seq = ++groupAnnouncementRequestSeq
+  const account = String(selectedAccount.value || '').trim()
+  const target = String(username || '').trim()
+  groupAnnouncement.value = ''
+  groupAnnouncementOpen.value = false
+  if (!account || !target.endsWith('@chatroom')) return
+
+  try {
+    const response = await api.getChatContactProfile({ account, username: target, source: 'auto' })
+    if (
+      seq !== groupAnnouncementRequestSeq
+      || account !== String(selectedAccount.value || '').trim()
+      || target !== String(selectedContact.value?.username || '').trim()
+    ) return
+    groupAnnouncement.value = String(response?.contact?.announcement || '').trim()
+  } catch {}
+}
+
+const openGroupAnnouncement = () => {
+  if (groupAnnouncement.value) groupAnnouncementOpen.value = true
+}
+
+const closeGroupAnnouncement = () => {
+  groupAnnouncementOpen.value = false
+}
 
 let exitSearchContext = async () => {}
 
@@ -926,6 +969,7 @@ const onGlobalKeyDown = (event) => {
     if (searchState.messageSearchOpen.value) searchState.closeMessageSearch()
     if (searchState.timeSidebarOpen.value) searchState.closeTimeSidebar()
     if (voiceSidebarOpen.value) closeVoiceSidebar()
+    groupMembersSidebarOpen.value = false
     if (searchContext.value?.active) exitSearchContext()
   }
 }
@@ -1066,10 +1110,27 @@ onUnmounted(() => {
   stopExportPolling()
 })
 
-watch(realtimeChangeSeq, () => {
+watch(realtimeMessageEventSeq, (next, previous) => {
   if (!process.client || document.visibilityState === 'hidden') return
+  if (next === previous) return
   if (accountBootstrapInProgress || accountChangeInProgress) return
-  queueRealtimeRefresh()
+  const event = realtimeMessageEvent.value
+  const username = String(
+    event?.username
+    || event?.message?.username
+    || event?.message?.chatUsername
+    || event?.message?.sessionId
+    || ''
+  ).trim()
+  const selectedUsername = String(selectedContact.value?.username || '').trim()
+  if (username && username === selectedUsername) void applyRealtimeMessage(event)
+  queueRealtimeSessionsRefresh()
+})
+
+watch(realtimeChangeSeq, (next, previous) => {
+  if (!process.client || document.visibilityState === 'hidden') return
+  if (next === previous || realtimeMessageEvent.value?.type !== 'conversation_updated') return
+  if (accountBootstrapInProgress || accountChangeInProgress) return
   queueRealtimeSessionsRefresh()
 })
 
@@ -1095,6 +1156,7 @@ watch(
   () => selectedContact.value?.username,
   (username) => {
     realtimeStore.setPriorityUsername(username || '')
+    void loadGroupAnnouncement(username)
   }
 )
 
@@ -1131,7 +1193,36 @@ watch(
   }
 )
 
+const groupMembersSidebarOpen = ref(false)
+const toggleGroupMembersSidebar = () => {
+  if (groupMembersSidebarOpen.value) {
+    groupMembersSidebarOpen.value = false
+    return
+  }
+  if (!selectedContact.value?.isGroup) return
+  closeVoiceSidebar()
+  messageState.closeResourceSidebar()
+  searchState.closeMessageSearch('group-members')
+  searchState.closeTimeSidebar()
+  groupMembersSidebarOpen.value = true
+}
+watch([selectedAccount, () => selectedContact.value?.username], () => {
+  groupMembersSidebarOpen.value = false
+})
+watch([
+  voiceSidebarOpen,
+  messageState.resourceSidebarOpen,
+  searchState.messageSearchOpen,
+  searchState.timeSidebarOpen
+], (opened) => {
+  if (opened.some(Boolean)) groupMembersSidebarOpen.value = false
+})
+const openAiPage = () => navigateTo('/ai')
+
 const chatState = {
+  groupMembersSidebarOpen,
+  toggleGroupMembersSidebar,
+  openAiPage,
   chatAccounts,
   selectedAccount,
   availableAccounts,
@@ -1165,6 +1256,10 @@ const chatState = {
   ...exportState,
   ...editingState,
   ...historyState,
+  groupAnnouncement,
+  groupAnnouncementOpen,
+  openGroupAnnouncement,
+  closeGroupAnnouncement,
   voiceSidebarOpen,
   voicePanelBusy,
   voicePanelError,

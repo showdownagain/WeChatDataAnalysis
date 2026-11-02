@@ -1,4 +1,5 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+import tailwindcss from '@tailwindcss/vite'
 import {
   FIRST_USE_AGREEMENT_STORAGE_KEY,
   FIRST_USE_AGREEMENT_VERSION,
@@ -51,12 +52,18 @@ export default defineNuxtConfig({
     }
   },
   
+  vite: {
+    plugins: [tailwindcss()]
+  },
+
   // 应用配置
   css: [
+    '~/assets/css/tailwind.css',
     '@fortawesome/fontawesome-free/css/all.min.css',
     '~/assets/css/chat.css',
     '~/assets/css/record-pages.css',
-    '~/assets/css/export-panels.css'
+    '~/assets/css/export-panels.css',
+    '~/assets/css/wxcdn-card.css'
   ],
 
   // 应用配置
@@ -83,7 +90,6 @@ export default defineNuxtConfig({
   
   // 模块配置
   modules: [
-    '@nuxtjs/tailwindcss',
     '@pinia/nuxt'
   ],
 
@@ -92,14 +98,4 @@ export default defineNuxtConfig({
     { path: '~/components', pathPrefix: false }
   ],
   
-  // Tailwind配置
-  tailwindcss: {
-    cssPath: ['~/assets/css/tailwind.css', { injectPosition: "first" }],
-    configPath: 'tailwind.config',
-    exposeConfig: {
-      level: 2
-    },
-    config: {},
-    viewer: true
-  }
 })

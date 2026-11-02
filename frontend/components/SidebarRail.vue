@@ -48,6 +48,18 @@
         </div>
       </div>
 
+      <button
+        type="button"
+        class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
+        title="AI 助手"
+        aria-label="AI 助手"
+        @click="goAi"
+      >
+        <span class="sidebar-rail-plate w-[var(--sidebar-rail-btn)] h-[var(--sidebar-rail-btn)] rounded-md flex items-center justify-center">
+          <i class="fa-solid fa-wand-magic-sparkles sidebar-rail-icon" :class="{ 'sidebar-rail-icon-active': isAiRoute }" aria-hidden="true"></i>
+        </span>
+      </button>
+
       <!-- Moments -->
       <div
         class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
@@ -77,6 +89,20 @@
           </div>
         </div>
       </div>
+
+      <!-- Pro 入口：样子照官网开场主按钮「免费试用高级版」，点了在浏览器里打开官网 -->
+      <button
+        type="button"
+        class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
+        title="Pro · 打开官网"
+        aria-label="Pro：在浏览器中打开官网"
+        @click="openOfficialSite"
+      >
+        <span class="pro-entry" aria-hidden="true">
+          <span class="pro-entry-face"></span>
+          <span class="pro-entry-label">Pro</span>
+        </span>
+      </button>
 
       <!-- Favorites -->
       <div
@@ -358,7 +384,7 @@
           <div v-else-if="!switchableAccountItems.length" class="space-y-1 px-1 py-2">
             <div class="text-[12px] text-[#666]">暂无可切换账号</div>
             <div class="text-[11px] leading-relaxed text-[#8a8a8a]">
-              只有已经获取并保存“数据库密钥 + 图片密钥”的账号会出现在这里。
+              获取并保存数据库密钥，或导入已解密的聊天数据后即可切换账号。
             </div>
             <ErrorNotice v-if="chatAccounts.error" :message="chatAccounts.error" compact class="text-[11px] text-red-600" />
           </div>
@@ -394,8 +420,8 @@
                 <div v-if="item.displayName" class="truncate text-[10px] text-[#8a8a8a]">{{ item.account }}</div>
               </div>
               <div class="flex shrink-0 items-center gap-1">
-                <span class="rounded-full bg-[#eefbf4] px-1.5 py-0.5 text-[10px] font-medium text-[#07964c]">DB</span>
-                <span class="rounded-full bg-[#eefbf4] px-1.5 py-0.5 text-[10px] font-medium text-[#07964c]">图片</span>
+                <span v-if="item.dbReady" class="rounded-full bg-[#eefbf4] px-1.5 py-0.5 text-[10px] font-medium text-[#07964c]">DB</span>
+                <span v-if="item.imageKeyPresent" class="rounded-full bg-[#eefbf4] px-1.5 py-0.5 text-[10px] font-medium text-[#07964c]">图片</span>
               </div>
             </button>
           </div>
@@ -468,6 +494,7 @@
 
 <script setup>
 import { storeToRefs } from 'pinia'
+import { openMessageExternalUrl } from '~/lib/chat/message-links'
 import { buildAccountAvatarUrl } from '~/lib/account-avatar'
 import { useChatAccountsStore } from '~/stores/chatAccounts'
 import { usePrivacyStore } from '~/stores/privacy'
@@ -499,6 +526,9 @@ const themeToggleTitle = computed(() => {
 })
 
 const { open: settingsDialogOpen, openDialog: openSettingsDialog } = useSettingsDialog()
+// 侧栏「Pro」打开官网：桌面端经主进程交给系统浏览器，网页端开新标签页
+const OFFICIAL_SITE_URL = 'https://lifearchiveproject.github.io/WeChatDataAnalysis/'
+const openOfficialSite = () => { void openMessageExternalUrl(OFFICIAL_SITE_URL) }
 const { getChatAccountInfo, deleteChatAccount } = useApi()
 
 const showGlobalExportEntry = true
@@ -573,6 +603,8 @@ const switchableAccountItems = computed(() => {
         active: account === normalizeAccountName(selectedAccount.value),
         displayName: accountDisplayName(account, info),
         avatarUrl: accountAvatarUrl(account, info),
+        dbReady: !!(info?.dbKeyPresent || info?.hasDecryptedDbs),
+        imageKeyPresent: !!info?.imageKeyPresent,
       }
     })
 })
@@ -739,6 +771,7 @@ const selectAccountFromDialog = async (account) => {
 }
 
 const isChatRoute = computed(() => route.path?.startsWith('/chat'))
+const isAiRoute = computed(() => route.path === '/ai')
 const isSnsRoute = computed(() => route.path?.startsWith('/sns'))
 const isFavoritesRoute = computed(() => route.path?.startsWith('/favorites'))
 const isContactsRoute = computed(() => route.path?.startsWith('/contacts'))
@@ -749,6 +782,7 @@ const isPaymentsRoute = computed(() => route.path?.startsWith('/payments'))
 const isWrappedRoute = computed(() => route.path?.startsWith('/wrapped'))
 
 const goChat = async () => { await navigateTo('/chat') }
+const goAi = async () => { await navigateTo('/ai') }
 const goSns = async () => { await navigateTo('/sns') }
 const goFavorites = async () => { await navigateTo('/favorites') }
 const goContacts = async () => { await navigateTo('/contacts') }
@@ -757,7 +791,7 @@ const goMiniPrograms = async () => { await navigateTo('/mini-programs') }
 const goFinder = async () => { await navigateTo('/finder') }
 const goPayments = async () => { await navigateTo('/payments') }
 const goWrapped = async () => { await navigateTo('/wrapped') }
-const goGuide = async () => { await navigateTo('/') }
+const goGuide = async () => { await navigateTo({ path: '/', query: { guide: '1' } }) }
 const goSettings = () => { openSettingsDialog() }
 
 const onWindowKeydown = (event) => {
@@ -853,6 +887,71 @@ const deleteCurrentAccountData = async () => {
 
 .sidebar-rail-action:hover .sidebar-rail-plate {
   background-color: var(--sidebar-rail-hover);
+}
+
+/* Pro 入口：照官网开场主按钮「免费试用高级版」——
+   底是冰蓝 → 薰衣草 → 蜜桃渐变，只露 1px 当边框；上面盖一层浅珠光渐变缓慢平移（三倍宽、只动 transform）；外圈一层很淡的同色光晕，悬停时提亮。
+   颜色固定浅色，深浅两种主题同一个样子（深色侧栏上和 PRO 小签一样亮），字固定深墨色 */
+.pro-entry {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 24px;
+  border-radius: 6px;
+  background: linear-gradient(100deg, #a9d4ff, #c4b5ff 52%, #ffc49c);
+  box-shadow: 0 0 8px rgba(150, 190, 255, 0.35), 0 0 12px rgba(196, 170, 255, 0.22);
+  transition: box-shadow 0.25s ease, transform 0.2s ease;
+}
+
+.pro-entry-face {
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  overflow: hidden;
+  border-radius: 5px;
+  background: #e3dbff;
+}
+
+/* 必须是 90° 的水平渐变：周期正好是平移量，循环衔接处不跳色 */
+.pro-entry-face::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 300%;
+  background: linear-gradient(90deg, #d2ebff 0%, #e3dbff 16.6667%, #ffe5cc 33.3333%, #e3dbff 50%, #d2ebff 66.6667%, #e3dbff 83.3333%, #ffe5cc 100%);
+  will-change: transform;
+  animation: pro-entry-pan 12s linear infinite;
+}
+
+.pro-entry-label {
+  color: #16182a;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.sidebar-rail-action:hover .pro-entry,
+.sidebar-rail-action:focus-visible .pro-entry {
+  box-shadow: 0 0 10px rgba(150, 190, 255, 0.55), 0 0 16px rgba(196, 170, 255, 0.38);
+}
+
+.sidebar-rail-action:active .pro-entry {
+  transform: translateY(1px);
+}
+
+@keyframes pro-entry-pan {
+  to { transform: translateX(-66.6667%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pro-entry-face::before { animation: none; }
 }
 
 .sidebar-rail-icon {
