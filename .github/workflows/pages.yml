@@ -1,17 +1,7 @@
 name: Deploy website to GitHub Pages
 
+# This fork is used for local WeChat data analysis; do not deploy its website automatically.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "website/**"
-      - "frontend/lib/pro-demos/catalog.js"
-      - "tools/dev/sync-site-catalog.mjs"
-      - "tools/dev/sync-site-changelog.mjs"
-      - ".github/workflows/pages.yml"
-  # 每天北京时间 09:23 重新部署一次，把高级版新发布的更新日志带上官网（不用等有人推代码）
-  schedule:
-    - cron: "23 1 * * *"
   workflow_dispatch:
 
 permissions:
